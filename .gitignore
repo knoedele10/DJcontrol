@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Node / 前端构建
+node_modules/
+Template/dist/
+*.tsbuildinfo
+*.local
+
+# 运行时数据：SQLite、uvicorn 日志
+Backend/Data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# 临时产物：截图、审计、探测结果
+.dsh-tmp/
+Backend/Tests/.audit-tmp/
+Probes/Results/

@@ -1,0 +1,7 @@
+# 仅真机探测环境使用；不加入后端服务依赖。
+pywin32==311; sys_platform == "win32"
+pywinauto==0.6.9; sys_platform == "win32"
+winrt-runtime==4.1.0; sys_platform == "win32"
+winrt-Windows.Media.Control==4!10.0.28000.2957; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==4!10.0.28000.2957; sys_platform == "win32"
+winrt-Windows.Media==4!10.0.28000.2957; sys_platform == "win32"

@@ -1,0 +1,23 @@
+# 容器只出界面，/api 与 /ws 转发给 Windows 上的 COM 宿主。
+# Windows 侧先启动后端（见 Docs/BackendGuide.md §2.5），端口要和 API_UPSTREAM 一致。
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kugou-dashboard:latest
+    container_name: kugou-dashboard
+    ports:
+      - "8080:8000"
+    environment:
+      API_UPSTREAM: ${API_UPSTREAM:-http://host.docker.internal:8081}
+    extra_hosts:
+      # Linux 容器里 host.docker.internal 不会自动出现，显式指向宿主机。
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
