@@ -71,7 +71,7 @@ export interface HistoryItem {
 export type PlayStatus = 'playing' | 'paused' | 'stopped' | 'unknown'
 export type ControllerName = 'mock' | 'kugou'
 
-/** 播放器状态（规划中，见契约 §3.5）：队列和已播随播放状态一起推送 */
+/** 播放器状态（见契约 §3.5）：队列和已播随播放状态一起推送 */
 export interface PlayerState {
   controller: ControllerName
   connected: boolean
@@ -122,10 +122,10 @@ export interface Capability {
   note: string
 }
 
-/** 诊断信息（规划中，见契约 §3.6） */
+/** 诊断信息（见契约 §3.6）。 */
 export interface Diagnostics {
   controller: ControllerName
-  kugou: { running: boolean; version: string | null; profile: string | null }
+  kugou: { running: boolean; version: string | null; profile: string | null; error: string | null }
   ppt: { app: PptApp; connected: boolean }
   capabilities: Capability[]
 }

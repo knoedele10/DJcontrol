@@ -15,10 +15,10 @@
 | 服务入口、健康检查 | 已实现 | `Main.py` |
 | PPT 控制（PowerPoint / WPS） | 已实现，有测试、探测脚本和整稿预览预载 | `PptControl/`、`PptControl/Service.py`、`PptControl/PreviewCache.py`、`PptControl/Api.py`、`Tests/TestPpt*.py`、`Probes/PptState.py` |
 | 数据库与迁移 | 已实现，含迁移、种子数据和仓储测试 | `Database/`、`Database/Migrations/`、`Tests/TestDatabase.py` |
-| 曲库、分组、本地搜索 | 已实现（M2）；酷狗搜索在 10.2.52 上做不了（见 M6） | `Library/Api.py`、`Library/Service.py`、`Library/Model.py`、`Tests/TestLibrary*.py` |
+| 曲库、分组、本地搜索 | 已实现（M2）；酷狗搜索见 M6 | `Library/Api.py`、`Library/Service.py`、`Library/Model.py`、`Tests/TestLibrary*.py` |
 | 播放器（模拟）、队列、场次、已播 | 已实现（M3） | `Player/Base.py`、`Player/Mock.py`、`Player/Service.py`、`Player/Api.py`、`Player/Model.py` |
 | 酷狗适配 | 已实现（M4、M5，针对 10.2.52.25713） | `KugouControl/`、`Probes/Kugou*.py`、`Tests/TestKugou*.py` |
-| 诊断与设置 | 未开始（M8） | – |
+| 诊断与设置 | 已实现（M8） | `Player/Api.py`、`Player/Service.py`、`Template/src/Diagnostics/`、`Template/src/Pages/Settings/` |
 
 前端曲库、队列、播放、PPT 已接入后端；`mockData.ts` 仅保留配色和离线兜底用的种子数据。
 
@@ -108,9 +108,8 @@ Backend/
   KugouControl/      # 控制酷狗：版本识别、窗口、媒体键、界面自动化、独立工作进程
     Profiles/        # 按酷狗版本区间的标题格式、热键、定位规则
   PptControl/        # 控制 PowerPoint / WPS：控制器、服务、预览缓存、路由、请求模型
-  Player/            # 播放器接口与模拟实现、队列、场次、已播、路由、请求模型
+  Player/            # 播放器接口与模拟实现、队列、场次、已播、诊断与设置（M8）、路由、请求模型
   Library/           # 曲库、分组、本地搜索
-  Diagnostics/       # 诊断与设置（M8，预留）
   Database/          # SQLite 连接、仓储、种子数据
     Migrations/      # 按序号命名的 .sql 迁移文件
   Tests/             # unittest，不依赖真实软件；文件名 Test*.py
@@ -217,7 +216,7 @@ PPT 预览补充：文稿载入后前端逐页预取并提前解码整稿 PNG，
 
 ### M3 播放器（模拟）、队列、场次、已播（已实现）
 - 契约 §3.4、§3.5、§8、§9（`controller=mock`）。
-- `Player/Queue.py`：入队（已存在则移动）、插到下一首、排序、删除；歌曲开始播放时出队并写已播。
+- 队列规则在 `Player/Service.py`，读写在 `Database/Repositories.py` 的 `QueueRepository`：入队（已存在则移动）、插到下一首、排序、删除；歌曲开始播放时出队并写已播。
 - 自动接歌在后端做：距结束 ≤ 3 秒且 `auto_next=true` 时播队列第 0 首。
 - 启动时没有进行中的场次就自动新建。
 - **完成标准**：前端 `Queue/QueueStore.ts`、`Playback/PlaybackStore.ts` 改为由 `/ws/player` 驱动后，排队、播放、暂停、上一首、自动接歌、已播记录行为与现在的模拟版一致；开两个浏览器窗口状态同步。当前已完成：模拟控制器实时进度、串行播放器服务、队列/场次/历史接口、自动接歌和 `/ws/player`，前端已切换为后端状态。
@@ -233,7 +232,7 @@ PPT 预览补充：文稿载入后前端逐页预取并提前解码整稿 PNG，
 - **2026-11-09 验证结果**：[能力记录](KugouCapabilities.md) 里七项能力都有确定结论。能：读取曲目、播放/暂停、酷狗自身上下曲、读取进度。不能：按歌名播放、酷狗搜索、跳转进度（控件不接受程序写入）。SMTC 在当前配置无会话。按歌名播放走专用歌单人工选曲退路。
 
 ### M5 酷狗适配（已完成）
-- `KugouControl/`：`version.py`（识别版本）、`profiles/`（按版本区间配置标题格式、热键、自动化定位规则）、`media.py`、`uia.py`、`adapter.py`。
+- `KugouControl/`：`Version.py`（识别版本）、`Profiles/`（按版本区间配置标题格式、热键、自动化定位规则）、`Media.py`、`Uia.py`、`Adapter.py`，`Worker.py` 在独立进程里串行执行酷狗操作。
 - 启动和切换控制器时做能力自检，结果进 `Diagnostics`。
 - 只实现 M4 验证过的能力；没验证的 `supported=False`，并在 `note` 里写原因。
 - 异常情况：酷狗未启动、窗口最小化、弹出广告或登录窗、酷狗更新后定位失败——都要返回明确的 `player_unavailable` 或 `state.error`，不能卡死工作线程（每个动作设超时）。
@@ -255,9 +254,10 @@ PPT 预览补充：文稿载入后前端逐页预取并提前解码整稿 PNG，
 - 前端删除 `Ppt/PptStore.ts` 里的联动播放逻辑，绑定改为调用接口；把浏览器里已有的绑定一次性导入后端。
 - **完成标准**：开两个浏览器窗口翻页，歌只播一次。
 
-### M8 诊断与设置
+### M8 诊断与设置（已实现）
 - 契约 §3.6、§9：`/api/diagnostics`、`/api/diagnostics/refresh`、`PUT /api/settings/controller`；设置存数据库，重启后保持。
 - **完成标准**：前端设置页显示真实版本、档案、能力自检结果，能在模拟和酷狗之间切换。
+- 当前已完成：诊断接口统一返回控制器、酷狗版本/档案/运行状态、PPT 连接状态和能力自检；设置页通过后端切换控制器；`player.controller`、`player.auto_next`、`ppt.link_music` 使用 SQLite 持久化；保留旧 `controller` 种子键的读取兼容；新增 M8 接口和服务重启回归测试。
 
 ---
 

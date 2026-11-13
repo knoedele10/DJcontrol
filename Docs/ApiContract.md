@@ -5,8 +5,8 @@
 | 版本 | v0.1.1（草案） |
 | 日期 | 2026-11-07 |
 | 适用 | `Template/`（Vue 3）↔ `Backend/`（FastAPI） |
-| 已实现 | 健康检查、PPT 模块（§4） |
-| 规划中 | 曲库与分组、搜索、队列与已播、播放控制、诊断（§5–§9） |
+| 已实现 | 健康检查、PPT、曲库与分组、搜索、队列与已播、播放控制、诊断设置（§4–§9） |
+| 规划中 | 无（酷狗能力以真机自检结果为准） |
 
 本文档是前后端唯一的接口约定。改接口时先改这里，再改两端代码，并在文末「变更记录」里写一行。
 **已实现部分以代码为准**；本文档与代码不一致时，视为文档缺陷，应修正文档。
@@ -57,12 +57,12 @@
 | 409 | `ppt_command_failed` | PPT 命令执行失败 | 已实现 |
 | 503 | `ppt_unavailable` | 找不到演示软件或放映 | 已实现 |
 | 404 | `not_found` | 资源不存在 | 播放器 / 队列已实现 |
-| 409 | `conflict` | 重名、重复添加 | 规划中 |
+| 409 | `conflict` | 重名、重复添加 | 已实现 |
 | 409 | `player_command_failed` | 播放器命令无法执行（队列为空、没有更早的已播歌曲、排序缺项） | 已实现 |
 | 409 | `capability_unsupported` | 当前播放器适配不支持该操作 | 已实现 |
-| 503 | `player_unavailable` | 找不到酷狗窗口 / 酷狗未启动 | 规划中 |
+| 503 | `player_unavailable` | 找不到酷狗窗口 / 酷狗未启动 | 已实现 |
 | 502 | `upstream_unavailable` | 代理模式下连不上 Windows 后端（`API_UPSTREAM` 不可达） | 已实现 |
-| 504 | `command_timeout` | 控制命令执行超时 | 规划中 |
+| 504 | `command_timeout` | 控制命令执行超时 | 已实现 |
 
 ### 1.5 状态信封与实时推送
 每个模块维护一份完整状态和一个**递增的 `revision`**，HTTP 控制接口和 WebSocket 推送都返回同样的信封：
@@ -215,7 +215,7 @@ interface PlayerUpdate {
 ```
 队列和已播放进播放器状态里一起推送：它们和「正在播什么」总是一起变化，合并后前端只需处理一种消息。
 
-### 3.6 诊断（规划中）
+### 3.6 诊断（已实现）
 ```ts
 interface Capability {
   name: string
@@ -374,7 +374,7 @@ interface PptUpdate {
 - 一首歌开始播放后自动移出队列，并追加一条已播记录。
 - 后端启动时如果没有进行中的场次，自动开一场。
 
-## 9. 播放控制（已实现，诊断仍规划中）
+## 9. 播放控制与诊断（已实现）
 
 | 方法 | 路径 | 请求体 | 所需能力 | 响应 |
 |---|---|---|---|---|
@@ -408,12 +408,12 @@ type PlayerCommand =
 |---|---|---|
 | `Ppt/PptApi.ts`、`Ppt/PptStore.ts` | **已接真实后端** | 绑定和联动开关调接口保存；联动播放由后端执行，前端只记录结果 |
 | `Library/LibraryApi.ts`、`Library/LibraryStore.ts` | localStorage + 模拟搜索 | `GET /api/songs`、`GET /api/groups`、`GET /api/search`、`/ws/library` |
-| `Diagnostics/DiagnosticsApi.ts` `fetchCapabilities` | 写死的列表 | `GET /api/diagnostics` |
+| `Diagnostics/DiagnosticsApi.ts` `fetchDiagnostics` | 后端诊断接口 | `GET /api/diagnostics`、`POST /api/diagnostics/refresh` |
 | `Library/LibraryStore.ts` 曲库 / 分组 | 后端接口；旧数据只作断线占位 | §5、§7；订阅 `/ws/library` |
 | `Library/LibraryStore.ts` `ensureInLibrary` | 本地追加 | `POST /api/songs/from-kugou` |
 | `Queue/QueueStore.ts` 队列 / 已播 | 后端接口；旧本地状态不再作为事实来源 | §8；状态来自 `/ws/player` |
 | `Playback/PlaybackStore.ts` | 前端计时模拟 | `/ws/player` 驱动；`report()` 跟随命令请求的成功 / 失败 |
-| `Pages/Settings/SettingsPage.vue` | 写死 | `GET /api/diagnostics`、`PUT /api/settings/controller` |
+| `Pages/Settings/SettingsPage.vue` | **已接真实后端** | `GET /api/diagnostics`、`POST /api/diagnostics/refresh`、`PUT /api/settings/controller` |
 
 类型对齐情况（2026-11-07 已完成）：
 - `Song.bpm`、`KugouResult.bpm` 为 `number | null`，显示用 `Common/Format.ts` 的 `fmtBpm`；`Song` 含 `note`。
@@ -439,6 +439,7 @@ type PlayerCommand =
 | 日期 | 版本 | 内容 |
 |---|---|---|
 | 2026-11-11 | v0.1.8 | PPT 页面绑定与翻页联动迁到后端：`PptUpdate` 增加 `bindings`、`link_music`、`link`；新增 `PUT /api/ppt/bindings/{slide}`、`PATCH /api/ppt/settings`、`POST /api/ppt/bindings/import` |
+| 2026-11-11 | v0.1.9 | M8 诊断与设置接入完成：控制器切换、酷狗/PPT 能力状态和 SQLite 设置持久化 |
 | 2026-11-11 | v0.1.7 | 酷狗搜索接入：`GET /api/search` 返回酷狗结果并新增 `source` 参数；`POST /api/songs/from-kugou` 可用；capability `kugou_search` 开放 |
 | 2026-11-10 | v0.1.6 | 酷狗开放 `play_track`、`seek`（投递消息实现）；`play` / `next_in_queue` / `previous` 在酷狗连接慢时返回 409「还在连接」，播出后自动补记；酷狗模式自动接歌仍不可用 |
 | 2026-11-09 | v0.1.5 | M5 酷狗适配完成：酷狗开放 `read_position`；新增 capability `seek`（酷狗不支持）；诊断的 `kugou` 增加 `error` |

@@ -4,9 +4,12 @@ __pycache__/
 .venv/
 .pytest_cache/
 
-# Node / 前端构建
+# Node / 前端与桌面构建
 node_modules/
 Template/dist/
+Desktop/dist/
+Desktop/release/
+Dest/
 *.tsbuildinfo
 *.local
 
@@ -20,4 +23,5 @@ Backend/Data/
 # 临时产物：截图、审计、探测结果
 .dsh-tmp/
 Backend/Tests/.audit-tmp/
+Backend/tmp*/
 Probes/Results/

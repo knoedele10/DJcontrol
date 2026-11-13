@@ -1,4 +1,4 @@
-﻿# 运行全部自动化测试：后端 unittest + 前端 PPT 测试。
+﻿# 运行全部自动化测试：后端 unittest + 前端 PPT 测试 + 桌面外壳测试。
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location (Join-Path $root 'Backend')
@@ -8,3 +8,6 @@ if ($LASTEXITCODE -ne 0) { throw "后端测试失败" }
 Set-Location (Join-Path $root 'Template')
 pnpm test
 if ($LASTEXITCODE -ne 0) { throw "前端测试失败" }
+Set-Location (Join-Path $root 'Desktop')
+pnpm test
+if ($LASTEXITCODE -ne 0) { throw "桌面端测试失败" }

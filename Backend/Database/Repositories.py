@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Iterable
 from uuid import uuid4
@@ -41,29 +40,6 @@ def _rewrite_positions(connection: sqlite3.Connection, table: str, rowids: list[
 def _compact_queue(connection: sqlite3.Connection) -> None:
     rowids = [row[0] for row in connection.execute("SELECT rowid FROM queue_items ORDER BY position, id")]
     _rewrite_positions(connection, "queue_items", rowids)
-
-
-@dataclass(frozen=True)
-class SongRecord:
-    id: int
-    title: str
-    artist: str
-    bpm: int | None
-    duration: int
-    source: str
-    note: str
-    created_at: str
-    updated_at: str
-
-
-@dataclass(frozen=True)
-class HistoryRecord:
-    id: int
-    session_id: str
-    song_id: int | None
-    title: str
-    artist: str
-    played_at: str
 
 
 class SongRepository:

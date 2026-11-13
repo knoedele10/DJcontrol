@@ -112,7 +112,11 @@ def seed_database(connection: sqlite3.Connection) -> bool:
     )
     connection.executemany(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-        [("controller", "mock", now), ("auto_next", "true", now), ("link_music", "true", now)],
+        [
+            ("player.controller", '"mock"', now),
+            ("player.auto_next", "true", now),
+            ("ppt.link_music", "true", now),
+        ],
     )
     connection.commit()
     return True

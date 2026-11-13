@@ -16,6 +16,7 @@ from Player.Model import PlayerCommand
 logger = logging.getLogger(__name__)
 
 AUTO_NEXT_KEY = "player.auto_next"
+CONTROLLER_KEY = "player.controller"
 
 
 class PlayerError(Exception):
@@ -368,6 +369,8 @@ class PlayerService:
             return await self._run(collect)
 
     async def switch_controller(self, name: Literal["mock", "kugou"]) -> dict:
+        if name not in ("mock", "kugou"):
+            raise ValueError("播放器必须为 mock 或 kugou")
         async with self._lock:
             def switch() -> PlayerState:
                 self._close_controller()
@@ -376,7 +379,7 @@ class PlayerService:
                 self._armed_song = None
                 self._back_steps = 0
                 self._loading = None
-                SettingsRepository(self.database).set("player.controller", name)
+                SettingsRepository(self.database).set(CONTROLLER_KEY, name)
                 return self._read_state()
             self._publish(await self._run(switch))
             return self.snapshot()

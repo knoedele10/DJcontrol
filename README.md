@@ -13,7 +13,10 @@
 .\Scripts\Dev.ps1           # 后端 8000 + 前端 5173
 .\Scripts\StartBackend.ps1  # 只起后端
 .\Scripts\Build.ps1         # 构建前端，单进程运行在 8081
-.\Scripts\Test.ps1          # 后端 + 前端自动化测试
+.\Scripts\DevDesktop.ps1    # 桌面开发模式（Vite 5173 + Electron）
+.\Scripts\StartDesktop.ps1  # 构建前端并启动 Electron 桌面端
+.\Scripts\BuildDesktop.ps1  # 打包 Windows Electron 应用（Desktop/release；-Target win 同步安装包到 Dest）
+.\Scripts\Test.ps1          # 后端 + 前端 + 桌面外壳自动化测试
 docker compose up -d --build  # 容器出界面，转发到 Windows 后端（8080）
 ```
 
@@ -25,9 +28,8 @@ docker compose up -d --build  # 容器出界面，转发到 Windows 后端（808
 |---|---|
 | `Backend/KugouControl/` | 控制酷狗：版本识别、窗口、媒体键、界面自动化 |
 | `Backend/PptControl/` | 控制 PowerPoint / WPS：控制器、服务、预览缓存、路由 |
-| `Backend/Player/` | 播放器接口与模拟实现、队列、场次、已播 |
+| `Backend/Player/` | 播放器接口与模拟实现、队列、场次、已播、诊断与设置（M8） |
 | `Backend/Library/` | 曲库、分组、本地搜索 |
-| `Backend/Diagnostics/` | 诊断与设置（预留） |
 | `Backend/Database/` | SQLite 连接、仓储、种子数据、`Migrations/` |
 | `Backend/Tests/` | unittest，文件名 `Test*.py` |
 | `Backend/Data/` | 运行时数据库和日志（不入库） |
@@ -38,7 +40,7 @@ docker compose up -d --build  # 容器出界面，转发到 Windows 后端（808
 | `Probes/` | 酷狗、PPT 能力探测脚本；`Results/` 为本机输出（不入库） |
 | `Docs/` | 设计和开发文档 |
 | `Scripts/` | 启动、构建、测试脚本 |
-| `Desktop/` | 预留：桌面外壳，尚未开始 |
+| `Desktop/` | Electron 桌面应用外壳（管理本地后端进程、窗口状态与 Windows 打包） |
 
 ## 文档
 

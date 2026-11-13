@@ -44,12 +44,15 @@ async def settings(body: PlayerSettings, request: Request) -> dict:
 
 @router.get("/api/diagnostics")
 async def diagnostics(request: Request) -> dict:
-    service = player(request)
-    await service.refresh()
-    result = await service.diagnostics()
-    ppt = request.app.state.ppt.state
-    result["ppt"] = {"app": ppt.app, "connected": ppt.connected}
-    return result
+    try:
+        service = player(request)
+        await service.refresh()
+        result = await service.diagnostics()
+        ppt = request.app.state.ppt.state
+        result["ppt"] = {"app": ppt.app, "connected": ppt.connected}
+        return result
+    except PlayerError as exc:
+        raise error_response(exc) from exc
 
 
 @router.post("/api/diagnostics/refresh")
@@ -59,8 +62,11 @@ async def refresh_diagnostics(request: Request) -> dict:
 
 @router.put("/api/settings/controller")
 async def controller_settings(body: ControllerSettings, request: Request) -> dict:
-    await player(request).switch_controller(body.name)
-    return await diagnostics(request)
+    try:
+        await player(request).switch_controller(body.name)
+        return await diagnostics(request)
+    except PlayerError as exc:
+        raise error_response(exc) from exc
 
 
 @router.post("/api/queue")

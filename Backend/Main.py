@@ -52,7 +52,9 @@ def create_app(
             raise ValueError("PLAYER_CONTROLLER 必须为 mock 或 kugou")
         db.connect()
         if "PLAYER_CONTROLLER" not in os.environ:
-            player_controller = SettingsRepository(db).get("player.controller", "mock")
+            settings = SettingsRepository(db)
+            # 兼容 M1 早期种子写入的 controller 键，避免升级后丢掉用户选择。
+            player_controller = settings.get("player.controller", settings.get("controller", "mock"))
             if player_controller not in ("mock", "kugou"):
                 db.close()
                 raise ValueError("保存的播放器配置无效")

@@ -1,5 +1,6 @@
 // M2 曲库和分组接口；组件只通过 stores/library.ts 调用这些函数。
 import type { Category, EventGroup, SearchResponse, Song } from '@/Common/Types'
+import { subscribeSocket } from '@/Common/Socket'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -20,13 +21,6 @@ export const fetchGroups = () => request<EventGroup[]>('/api/groups')
 export const fetchLibrarySearch = (query: string, source: 'library' | 'kugou', limit = 30) =>
   request<SearchResponse>(`/api/search?q=${encodeURIComponent(query)}&limit=${limit}&source=${source}`)
 
-export const createSong = (body: Pick<Song, 'title' | 'artist' | 'bpm' | 'duration' | 'note'>) =>
-  request<Song>('/api/songs', json(body))
-export const importSongs = (text: string, category_ids: string[] = []) =>
-  request<{ added: number; skipped: number; songs: Song[] }>('/api/songs/import', json({ text, category_ids }))
-export const updateSong = (id: number, body: Partial<Pick<Song, 'title' | 'artist' | 'bpm' | 'duration' | 'note'>>) =>
-  request<Song>(`/api/songs/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
-export const deleteSong = (id: number) => request<void>(`/api/songs/${id}`, { method: 'DELETE' })
 export const importKugouSong = (key: string) => request<Song>('/api/songs/from-kugou', json({ key }))
 
 export const createGroup = (body: { name: string; color?: string }) => request<EventGroup>('/api/groups', json(body))
@@ -49,35 +43,7 @@ export const removeCategorySong = (categoryId: string, songId: number) =>
 export const replaceCategorySongs = (categoryId: string, song_ids: number[]) =>
   request<Category>(`/api/categories/${categoryId}/songs`, { method: 'PUT', body: JSON.stringify({ song_ids }) })
 
-export function subscribeLibrary(onChanged: (revision: number, scope: string) => void, onConnection: (open: boolean) => void): () => void {
-  let socket: WebSocket | undefined
-  let retry = 0
-  let stopped = false
-
-  function open() {
-    if (stopped) return
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    socket = new WebSocket(`${protocol}//${location.host}/ws/library`)
-    socket.onopen = () => onConnection(true)
-    socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data)
-        if (message.type === 'library_changed') onChanged(Number(message.revision), String(message.scope))
-      } catch {
-        socket?.close()
-      }
-    }
-    socket.onerror = () => socket?.close()
-    socket.onclose = () => {
-      onConnection(false)
-      if (!stopped) retry = window.setTimeout(open, 1500)
-    }
-  }
-
-  open()
-  return () => {
-    stopped = true
-    clearTimeout(retry)
-    socket?.close()
-  }
-}
+export const subscribeLibrary = (onChanged: (revision: number, scope: string) => void, onConnection: (open: boolean) => void) =>
+  subscribeSocket<{ revision: number; scope: string }>(
+    '/ws/library', 'library_changed', (message) => onChanged(Number(message.revision), String(message.scope)), onConnection, false,
+  )

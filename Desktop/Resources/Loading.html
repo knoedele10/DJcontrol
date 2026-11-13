@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>酷狗统筹面板</title>
+    <style>
+      :root {
+        --bg: #0a0918;
+        --panel: #13122a;
+        --raise: #1c1a3a;
+        --line: #2a2750;
+        --line-strong: #3d3970;
+        --fg: #f3f1ff;
+        --fg2: #b0acd6;
+        --fg3: #7a76a8;
+        --accent: #22d3ff;
+        --hot: #ff3da6;
+        --violet: #8b5cff;
+        --bad: #ff4d6d;
+        --bad-soft: rgba(255, 77, 109, 0.16);
+        --grad: linear-gradient(90deg, #ff3da6 0%, #8b5cff 50%, #22d3ff 100%);
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        height: 100%;
+        margin: 0;
+        background:
+          radial-gradient(900px 520px at 85% -10%, rgba(139, 92, 255, 0.18), transparent 60%),
+          radial-gradient(760px 460px at -5% 110%, rgba(255, 61, 166, 0.12), transparent 60%),
+          var(--bg);
+        color: var(--fg);
+        font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(560px, 100%);
+        background: rgba(19, 18, 42, 0.94);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 30px 28px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .disc {
+        width: 58px;
+        height: 58px;
+        flex: none;
+        border-radius: 50%;
+        background: repeating-radial-gradient(circle at center, #2a2550 0 2px, #17152f 2px 4px);
+        border: 2px solid var(--line-strong);
+        display: grid;
+        place-items: center;
+      }
+      .disc.spin {
+        animation: spin 2.2s linear infinite;
+        border-color: var(--hot);
+        box-shadow: 0 0 22px rgba(255, 61, 166, 0.4);
+      }
+      .disc.error {
+        border-color: var(--bad);
+        box-shadow: 0 0 22px rgba(255, 77, 109, 0.35);
+      }
+      .disc i {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--grad);
+        display: block;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .sub {
+        margin: 6px 0 0;
+        color: var(--fg2);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .error-box {
+        display: none;
+        margin-top: 20px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--bad-soft);
+        border: 1px solid rgba(255, 77, 109, 0.45);
+        color: #ffdbe2;
+        font-size: 13px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .logs {
+        display: none;
+        margin-top: 14px;
+        max-height: 180px;
+        overflow: auto;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #080713;
+        border: 1px solid var(--line);
+        color: var(--fg2);
+        font-family: Consolas, ui-monospace, monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .actions {
+        display: none;
+        margin-top: 18px;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      button {
+        height: 38px;
+        padding: 0 16px;
+        border-radius: 10px;
+        border: 1px solid var(--line-strong);
+        background: var(--raise);
+        color: var(--fg);
+        font: inherit;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        border: none;
+        background: var(--grad);
+        color: #fff;
+        font-weight: 700;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .is-error .error-box,
+      .is-error .actions {
+        display: flex;
+      }
+      .is-error .error-box {
+        display: block;
+      }
+      .has-logs .logs {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="root" class="card">
+      <div class="head">
+        <div id="disc" class="disc spin"><i></i></div>
+        <div>
+          <h1 id="title">酷狗统筹面板</h1>
+          <p id="status" class="sub">正在启动本地控制服务与数据库…</p>
+        </div>
+      </div>
+      <div id="errorBox" class="error-box" role="alert"></div>
+      <pre id="logs" class="logs"></pre>
+      <div class="actions">
+        <button id="retryBtn" class="primary" type="button">重试启动</button>
+        <button id="logsBtn" type="button">打开日志目录</button>
+      </div>
+    </main>
+    <script>
+      const root = document.getElementById('root')
+      const disc = document.getElementById('disc')
+      const statusEl = document.getElementById('status')
+      const errorBox = document.getElementById('errorBox')
+      const logsEl = document.getElementById('logs')
+      const retryBtn = document.getElementById('retryBtn')
+      const logsBtn = document.getElementById('logsBtn')
+
+      function render(state) {
+        if (!state) return
+        if (state.phase === 'error') {
+          root.classList.add('is-error')
+          disc.classList.remove('spin')
+          disc.classList.add('error')
+          statusEl.textContent = '桌面服务未能就绪，请检查下方提示后重试。'
+          errorBox.textContent = state.error || '本地后端启动失败'
+          retryBtn.disabled = false
+        } else {
+          root.classList.remove('is-error')
+          disc.classList.add('spin')
+          disc.classList.remove('error')
+          statusEl.textContent = state.message || '正在启动本地控制服务…'
+          retryBtn.disabled = true
+        }
+        const lines = Array.isArray(state.logs) ? state.logs : []
+        if (lines.length) {
+          root.classList.add('has-logs')
+          logsEl.textContent = lines.slice(-30).join('\n')
+          logsEl.scrollTop = logsEl.scrollHeight
+        } else {
+          root.classList.remove('has-logs')
+          logsEl.textContent = ''
+        }
+      }
+
+      retryBtn.addEventListener('click', () => {
+        retryBtn.disabled = true
+        window.desktopApp?.retryStart()
+      })
+      logsBtn.addEventListener('click', () => {
+        window.desktopApp?.openLogsDir()
+      })
+
+      if (window.desktopApp) {
+        window.desktopApp.onStatus(render)
+        window.desktopApp.getStatus().then(render).catch(() => {})
+      }
+    </script>
+  </body>
+</html>

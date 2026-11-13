@@ -1,0 +1,8 @@
+allowBuilds:
+  electron: true
+  esbuild: true
+  electron-winstaller: true
+  app-builder-bin: true
+
+overrides:
+  'app-builder-lib>@electron/get': '^5.1.0'
