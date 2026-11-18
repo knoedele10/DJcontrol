@@ -32,6 +32,8 @@ kbd { font-family: var(--f-mono); font-size: 12px; padding: 1px 6px; border: 1px
 mark { background: rgba(255, 61, 166, 0.35); color: inherit; border-radius: 2px; padding: 0 1px; }
 
 .mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+/* 教程高亮的区域滚动到可见时留点边距，高亮框不会贴着屏幕边缘被切掉 */
+[data-tour], [data-song-card] { scroll-margin: 20px; }
 .lbl { font-size: 12px; letter-spacing: 0.08em; color: var(--fg3); }
 .empty { color: var(--fg3); font-size: 14px; padding: 24px 16px; line-height: 1.7; }
 

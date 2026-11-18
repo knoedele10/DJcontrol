@@ -14,9 +14,17 @@ sys.path.insert(0, str(PROBES))
 import KugouCommon
 import KugouMedia
 import KugouSmtc
+import KugouUiaTree
+from types import SimpleNamespace
 
 
 class KugouProbeTests(unittest.TestCase):
+    def test_playlist_probe_reads_unnamed_edits_but_never_passwords(self):
+        self.assertTrue(KugouUiaTree.readable_edit(SimpleNamespace(name='', element=SimpleNamespace(CurrentIsPassword=False))))
+        self.assertFalse(KugouUiaTree.readable_edit(SimpleNamespace(name='', element=SimpleNamespace(CurrentIsPassword=True))))
+        self.assertFalse(KugouUiaTree.readable_edit(SimpleNamespace(name='用户名', element=SimpleNamespace(CurrentIsPassword=False))))
+        self.assertFalse(KugouUiaTree.readable_edit(SimpleNamespace(name='未知字段')))
+
     def test_media_default_never_sends_or_queries_real_software(self):
         output = io.StringIO()
         with patch.object(sys, "argv", ["KugouMedia.py"]), \

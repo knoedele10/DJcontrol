@@ -17,8 +17,13 @@
 .\Scripts\StartDesktop.ps1  # 构建前端并启动 Electron 桌面端
 .\Scripts\BuildDesktop.ps1  # 打包 Windows Electron 应用（Desktop/release；-Target win 同步安装包到 Dest）
 .\Scripts\Test.ps1          # 后端 + 前端 + 桌面外壳自动化测试
-docker compose up -d --build  # 容器出界面，转发到 Windows 后端（8080）
+.\Scripts\StartDocker.ps1   # Windows 控制服务 + Docker 网页，访问 http://127.0.0.1:8080
+.\Scripts\StopDocker.ps1    # 停止网页和该脚本启动的控制服务
 ```
+
+Docker 只提供网页和接口转发。控制酷狗/PPT 还需要同一 Windows 用户桌面中的后端；只运行 `docker compose up` 不会自动启动它。`StartDocker.ps1` 默认启动 8081 端口的酷狗控制器，再构建/启动容器并检查整条连接。已构建时可加 `-NoBuild`；端口冲突可用 `-BackendPort` 指定其他端口。酷狗可能占用 8000，因此 Docker 模式使用 8081。
+
+网页提示“控制服务未连接”时，在项目根目录运行上面的启动脚本。连接恢复后仍提示酷狗最小化时，将酷狗恢复到音乐主窗口，再在设置页点“重新检测”。
 
 ## 目录
 
@@ -34,7 +39,7 @@ docker compose up -d --build  # 容器出界面，转发到 Windows 后端（808
 | `Backend/Tests/` | unittest，文件名 `Test*.py` |
 | `Backend/Data/` | 运行时数据库和日志（不入库） |
 | `Template/src/Pages/` | 页面，每个页面一个文件夹：`Dashboard/`、`Settings/` |
-| `Template/src/Library/` 等 | 按功能放组件、状态（`*Store.ts`）和接口（`*Api.ts`）：`Library`、`Playback`、`Queue`、`History`、`Scenes`、`Ppt`、`Diagnostics` |
+| `Template/src/Library/` 等 | 按功能放组件、状态（`*Store.ts`）和接口（`*Api.ts`）：`Library`、`Playback`、`Queue`、`History`、`Scenes`、`Ppt`、`Diagnostics`、`Tutorial`（首次打开强制显示的使用教程） |
 | `Template/src/Common/` | 公共组件、类型、格式化、本地存储 |
 | `Template/Tests/` | 前端测试 |
 | `Probes/` | 酷狗、PPT 能力探测脚本；`Results/` 为本机输出（不入库） |
@@ -48,4 +53,5 @@ docker compose up -d --build  # 容器出界面，转发到 Windows 后端（808
 - [BackendGuide.md](Docs/BackendGuide.md)：环境、目录、里程碑进度、完成标准
 - [PptControl.md](Docs/PptControl.md)：PPT 模块，新模块的参考模板
 - [KugouCapabilities.md](Docs/KugouCapabilities.md)：酷狗各项能力的验证结论
+- [PlaylistPlayback.md](Docs/PlaylistPlayback.md)：演出歌单直播放、逐首加入、能力门槛与待完成的真机验收
 - [Prototype/](Docs/Prototype/)：界面原型

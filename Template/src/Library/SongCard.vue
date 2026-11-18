@@ -48,6 +48,9 @@ function onDragStart(e: DragEvent) {
     @dragend="dragging = false"
   >
     <div class="acts">
+      <button v-if="playback.controller === 'kugou'" class="ib" :disabled="!playback.can('add_to_playlist') || playback.busy"
+        title="加入演出歌单（会试听切歌，完成后暂停；请在演出前使用）" aria-label="加入演出歌单"
+        @click.stop="playback.addPlaylistSong(song.id)">♫＋</button>
       <button class="ib" title="设置分组" aria-label="设置分组" @click.stop="ui.openGroupPopover(song.id, $event.currentTarget as HTMLElement)">⌗</button>
       <button class="ib" title="插到下一首" aria-label="插到下一首" @click.stop="enqueue(true)">⤒</button>
       <button class="ib go" :disabled="!playback.can('play_track') || playback.busy" title="立即播放" aria-label="立即播放" @click.stop="playback.play(song.id)">▶</button>
@@ -58,6 +61,7 @@ function onDragStart(e: DragEvent) {
       <span class="mono">{{ fmtBpm(song.bpm) }}</span>
       <span class="mono">{{ fmtTime(song.duration) }}</span>
       <span v-if="queue.isPlayed(song.id)" class="played">已播</span>
+      <span v-if="playback.playlist?.songs[String(song.id)] === true" class="played" title="最近一次核验在演出歌单内；歌单改动后请刷新">歌单内</span>
     </div>
     <div class="grpline">
       <span v-for="m in mem.slice(0, 3)" :key="m.category.id" class="gtag">{{ m.group.name }}·{{ m.category.name }}</span>

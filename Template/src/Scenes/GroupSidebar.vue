@@ -81,10 +81,10 @@ async function onDrop(e: DragEvent, catId: string) {
 </script>
 
 <template>
-  <aside class="col side">
+  <aside class="col side" data-tour="sidebar">
     <div class="col-h"><h2>活动分组</h2></div>
 
-    <div class="groups">
+    <div class="groups" data-tour="groups">
       <template v-for="g in library.groups" :key="g.id">
         <div v-if="isEditing('group', g.id)" class="grp on">
           <InlineInput :initial="g.name" placeholder="组名" @commit="commitRename" @cancel="editing = null" />
@@ -112,7 +112,7 @@ async function onDrop(e: DragEvent, catId: string) {
     <div class="cat-h"><span class="lbl">{{ group ? `${group.name} · 分类` : '分类' }}</span></div>
 
     <div v-if="!group" class="empty">先新建一个活动组。</div>
-    <div v-else class="scenes">
+    <div v-else class="scenes" data-tour="categories">
       <div class="scene" :class="{ on: library.activeCategoryId === 'all' }" tabindex="0" @click="library.selectCategory('all')">
         <span class="dot" style="background: var(--fg3); box-shadow: none"></span><span class="n">全部</span><span class="c mono">{{ allCount }}</span>
       </div>

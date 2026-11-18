@@ -8,6 +8,7 @@ __pycache__/
 node_modules/
 Template/dist/
 Desktop/dist/
+Desktop/.bundle/
 Desktop/release/
 Dest/
 *.tsbuildinfo

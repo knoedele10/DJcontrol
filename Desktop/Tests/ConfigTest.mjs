@@ -47,7 +47,12 @@ test('resolveDesktopPaths prefers unpacked runner/icon and userData DB when pack
     resourcesPath,
     userDataPath: 'C:/Users/demo/AppData/Roaming/app',
     platform: 'win32',
-    env: {},
+    env: {
+      FRONTEND_DIST: 'D:/missing/frontend',
+      DB_PATH: 'C:/Program Files/App/resources/backend/Data/host.db',
+      KGDASH_PYTHON: 'C:/host/python.exe',
+      PYTHON_EXE: 'C:/host/other.exe',
+    },
     exists: (target) => existing.has(path.normalize(target)),
   })
 
@@ -57,12 +62,25 @@ test('resolveDesktopPaths prefers unpacked runner/icon and userData DB when pack
   assert.equal(paths.runnerScript, unpackedRunner)
   assert.equal(paths.iconPath, unpackedIcon)
   assert.equal(paths.pythonExecutable, bundledPython)
+  assert.equal(paths.cacheDir, path.join('C:/Users/demo/AppData/Roaming/app', 'cache'))
 })
 
-test('resolvePythonExecutable respects env overrides and posix paths', () => {
+test('resolvePythonExecutable locks bundled interpreter when packaged and respects env overrides only in unpackaged mode', () => {
   assert.equal(
     resolvePythonExecutable({
       isPackaged: true,
+      backendDir: '/app/backend',
+      resourcesPath: '/app/resources',
+      platform: 'win32',
+      env: { KGDASH_PYTHON: 'C:/host/python.exe', PYTHON_EXE: 'C:/host/other.exe' },
+      exists: () => false,
+    }),
+    path.join('/app/resources', 'python', 'python.exe'),
+  )
+
+  assert.equal(
+    resolvePythonExecutable({
+      isPackaged: false,
       backendDir: '/app/backend',
       resourcesPath: '/app/resources',
       platform: 'linux',
@@ -111,6 +129,27 @@ test('parseDesktopOptions handles dev mode, port overrides, and devtools flag', 
 
   assert.equal(parseDesktopOptions(['--smoke-test'], {}).smokeTest, true)
   assert.equal(parseDesktopOptions([], { KGDASH_PORT: 'not-a-port' }).preferredPort, 18081)
+  assert.deepEqual(
+    parseDesktopOptions(
+      ['--dev', '--smoke-test'],
+      {
+        ELECTRON_DEV: '1',
+        KGDASH_DEV: '1',
+        KGDASH_DEV_URL: 'http://127.0.0.1:9999',
+        KGDASH_PORT: '19000',
+        KGDASH_SMOKE_TEST: '1',
+      },
+      true,
+    ),
+    {
+      devMode: false,
+      devUrl: 'http://127.0.0.1:5173',
+      preferredPort: 18081,
+      openDevTools: false,
+      smokeTest: true,
+    },
+  )
+  assert.equal(parseDesktopOptions([], { KGDASH_SMOKE_TEST: '1' }, true).smokeTest, false)
 })
 
 test('findAvailablePort falls back to an ephemeral port when preferred port is occupied', async () => {

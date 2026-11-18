@@ -22,7 +22,7 @@ watch(() => ppt.index, async () => {
 </script>
 
 <template>
-  <section class="col" aria-label="PPT 放映">
+  <section class="col" aria-label="PPT 放映" data-tour="ppt">
     <div class="col-h">
       <h2>PPT 放映</h2>
       <span class="pchip" :class="ppt.synced && ppt.running ? 'live' : 'idle'">{{ !ppt.synced ? '未同步' : !ppt.connected ? '未连接' : ppt.running ? (ppt.black ? '● 放映中 · 黑屏' : '● 放映中') : '未放映' }}</span>

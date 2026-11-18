@@ -85,15 +85,33 @@ python -m uvicorn Main:app --host 127.0.0.1 --port 8081
 
 **B. 容器出界面、Windows 出 COM（代理模式）**。设 `API_UPSTREAM` 后容器只提供静态页面，`/api`、`/ws` 转发给 Windows 后端；数据库和 COM 都留在 Windows 侧，容器不再挂数据卷：
 ```powershell
-# 先在 Windows 按 A 启动后端（示例端口 8081）
+# 推荐：在运行酷狗的 Windows 用户桌面，一条命令启动两端并检查连接
+.\Scripts\StartDocker.ps1
+# 已构建镜像时：.\Scripts\StartDocker.ps1 -NoBuild
+# 停止两端：.\Scripts\StopDocker.ps1
+```
+
+脚本默认把 Windows 控制器启动为 `kugou`、监听 `0.0.0.0:8081`，数据仍在 `Backend/Data`，后台日志为 `dockerbackend.stdout.log` / `dockerbackend.stderr.log`。参数 `-BackendPort` 会同步本次 Compose 的上游端口，`-Controller mock` 可用于模拟。脚本只复用可识别的本地控制服务，不终止占用端口的其他程序。酷狗可能占用 8000 端口，不能把“8000 有响应”当成本项目后端已启动。
+
+手动分开启动时，在 Windows 先执行以下命令；不能直接复用 A 中只绑定 `127.0.0.1` 的示例，Docker 必须能通过宿主机地址访问它：
+
+```powershell
+.\Scripts\StartBackend.ps1 -Docker  # 0.0.0.0:8081；Windows 终端保持运行
+```
+
+另开终端启动容器：
+
+```powershell
 docker run -d --name kugou-dashboard -p 8080:8000 `
   -e API_UPSTREAM=http://host.docker.internal:8081 `
   --add-host=host.docker.internal:host-gateway `
   --restart unless-stopped kugou-dashboard
 ```
-访问 `http://127.0.0.1:8080`。也可以 `docker compose up -d --build`，`docker-compose.yml` 已带好 `extra_hosts` 和默认上游。
+访问 `http://127.0.0.1:8080`。Windows 后端已启动后，也可以 `docker compose up -d --build`，`docker-compose.yml` 已带好 `extra_hosts` 和默认上游；Compose 本身只启动 Linux 容器。
 
 上游连不上时接口返回 502 `upstream_unavailable`；`/api/health` 只看容器自己（多带 `mode`、`upstream` 两个字段），所以 Windows 后端没起来不会让容器反复重启。
+
+`GET /api/connection` 独立检查上游健康接口，返回 `mode`、`backend_connected`、`upstream`、`message`，探测超时为 3 秒，不持有播放器锁。网页每 10 秒检查一次，控制服务断开时显示启动指引；“重新检测”立即显示进度，连接未恢复时给出明确原因。接口连接成功和酷狗控制可用分别判断：窗口最小化、托盘或弹窗仍会使对应能力不可用。
 
 ---
 

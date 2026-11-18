@@ -16,7 +16,7 @@ const remove = (itemId: string, title: string) => playback.track(`移出队列�
 </script>
 
 <template>
-  <section class="col qcol" aria-label="待播队列">
+  <section class="col qcol" aria-label="待播队列" data-tour="queue">
     <div class="qhead">
       <h2>待播队列</h2>
       <span v-if="queue.rows.length" class="mono sum">{{ queue.rows.length }} 首 · {{ fmtTime(queue.totalSeconds) }}</span>

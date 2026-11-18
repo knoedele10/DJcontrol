@@ -1,8 +1,8 @@
 // M3 播放状态：由后端 PlayerUpdate 驱动，前端不再自己推进进度或写已播记录。
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import type { Capability, CommandLog, CommandStatus, PlayerCommand, PlayerUpdate } from '@/Common/Types'
-import { fetchPlayerState, sendPlayerCommand, setAutoNext, subscribePlayer } from '@/Playback/PlayerApi'
+import type { Capability, CommandLog, CommandStatus, PlayerCommand, PlayerUpdate, PlaylistState } from '@/Common/Types'
+import { fetchPlayerState, sendPlayerCommand, setAutoNext, subscribePlayer, fetchPlaylist, addPlaylistTrack } from '@/Playback/PlayerApi'
 import { useLibraryStore } from '@/Library/LibraryStore'
 import { useQueueStore } from '@/Queue/QueueStore'
 
@@ -16,7 +16,9 @@ export const usePlaybackStore = defineStore('playback', () => {
   const artist = ref('')
   const capabilities = ref<Capability[]>([])
   const can = (name: string) => capabilities.value.some(c => c.name === name && c.supported)
-  const busy = computed(() => command.value.status === 'pending')
+  const playlist = ref<PlaylistState | null>(null)
+  const playlistBusy = ref(false)
+  const busy = computed(() => command.value.status === 'pending' || playlistBusy.value)
   const currentId = ref<number | null>(null)
   const playing = ref(false)
   const position = ref(0)
@@ -30,6 +32,12 @@ export const usePlaybackStore = defineStore('playback', () => {
   const nearEnd = computed(() => duration.value > 0 && duration.value - position.value <= 15)
   let unsubscribe: (() => void) | undefined
   let lastRevision = -1
+  let playlistRequest = 0
+
+  watch(() => library.songs.map(song => `${song.id}:${song.title}:${song.artist}`).join('\0'), () => {
+    playlist.value = null
+    void loadPlaylist()
+  })
 
   function report(text: string, status: CommandStatus) { command.value = { text, status } }
 
@@ -77,6 +85,7 @@ export const usePlaybackStore = defineStore('playback', () => {
       connected.value = false
       error.value = message(cause, '播放器服务未连接')
     })
+    void loadPlaylist()
     unsubscribe = subscribePlayer((update) => applyUpdate(update), (open) => {
       connected.value = open
       if (open) lastRevision = -1 // 后端重启后 revision 从 0 重新开始
@@ -105,10 +114,41 @@ export const usePlaybackStore = defineStore('playback', () => {
       const update = await sendPlayerCommand(request)
       applyUpdate(update)
       if (update.state.error || update.state.status === 'unknown') throw new Error(update.state.error ?? '命令已发送，但未能核验状态')
-      report(`${label} · ${update.state.title || '无当前歌曲'}`, 'verified')
+      const via = update.state.via === 'playlist' ? ' · 歌单直播放' : update.state.via === 'search' ? ' · 搜索播放' : ''
+      report(`${label} · ${update.state.title || '无当前歌曲'}${via}`, 'verified')
     } catch (cause) {
       error.value = message(cause, '播放器命令失败')
       report(error.value, 'failed')
+    } finally {
+      void loadPlaylist()
+    }
+  }
+
+  async function loadPlaylist() {
+    const request = ++playlistRequest
+    try {
+      const state = await fetchPlaylist()
+      if (request === playlistRequest) playlist.value = state
+    } catch { if (request === playlistRequest) playlist.value = null }
+  }
+
+  function applyPlaylist(state: PlaylistState) {
+    playlistRequest++
+    playlist.value = state
+  }
+
+  async function addPlaylistSong(songId: number) {
+    if (busy.value) return
+    playlistBusy.value = true
+    report(`试听并加入演出歌单：${library.songById(songId)?.title ?? '歌曲'}`, 'pending')
+    try {
+      const result = await addPlaylistTrack(songId)
+      applyPlaylist(result.playlist)
+      report(result.message, result.status === 'unverified' ? 'failed' : 'verified')
+    } catch (cause) {
+      report(message(cause, '加入演出歌单失败'), 'failed')
+    } finally {
+      playlistBusy.value = false
     }
   }
 
@@ -131,5 +171,6 @@ export const usePlaybackStore = defineStore('playback', () => {
   return {
     controller, title, artist, capabilities, can, busy, mediaNext, mediaPrevious, currentId, current, playing, position, duration, nearEnd, autoNext, autoNextPending, connected, error, command,
     startSync, stopSync, applyUpdate, report, log, track, setAutoNextEnabled, play, playNext, toggle, previous, seek, tick,
+    playlist, playlistBusy, loadPlaylist, applyPlaylist, addPlaylistSong,
   }
 })

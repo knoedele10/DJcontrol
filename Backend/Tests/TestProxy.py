@@ -18,6 +18,9 @@ from Proxy import normalize_upstream
 
 class _UpstreamHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
+        if self.path == '/api/health':
+            self._reply(200, {'status': 'ok'})
+            return
         if self.path.startswith("/api/missing"):
             self._reply(404, {"detail": "not found"})
             return
@@ -89,6 +92,22 @@ class ProxyHttpTests(unittest.TestCase):
             response = client.get("/api/songs")
             self.assertEqual(response.status_code, 502)
             self.assertEqual(response.json()["detail"]["code"], "upstream_unavailable")
+
+    def test_connection_probe_distinguishes_live_container_from_missing_windows_backend(self):
+        upstream = f'http://127.0.0.1:{_closed_port()}'
+        with TestClient(create_app(upstream=upstream)) as client:
+            self.assertEqual(client.get('/api/health').status_code, 200)
+            result = client.get('/api/connection')
+            self.assertEqual(result.status_code, 200)
+            self.assertFalse(result.json()['backend_connected'])
+            self.assertEqual(result.json()['mode'], 'proxy')
+            self.assertIn('Windows', result.json()['message'])
+
+    def test_connection_probe_checks_real_upstream_health(self):
+        with TestClient(create_app(upstream=self.upstream)) as client:
+            result = client.get('/api/connection').json()
+            self.assertTrue(result['backend_connected'])
+            self.assertEqual(result['upstream'], self.upstream)
 
     def test_proxy_mode_has_no_local_database(self) -> None:
         with TestClient(create_app(upstream=self.upstream)) as client:

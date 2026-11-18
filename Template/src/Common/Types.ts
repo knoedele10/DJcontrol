@@ -71,6 +71,13 @@ export interface HistoryItem {
 export type PlayStatus = 'playing' | 'paused' | 'stopped' | 'unknown'
 export type ControllerName = 'mock' | 'kugou'
 
+export interface BackendConnectionState {
+  mode: 'local' | 'proxy' | 'unknown'
+  backend_connected: boolean
+  upstream: string | null
+  message: string
+}
+
 /** 播放器状态（见契约 §3.5）：队列和已播随播放状态一起推送 */
 export interface PlayerState {
   controller: ControllerName
@@ -87,6 +94,7 @@ export interface PlayerState {
   recent_history: HistoryItem[]
   error: string | null
   capabilities: Capability[]
+  via?: 'playlist' | 'search' | null
 }
 
 export interface PlayerUpdate {
@@ -128,6 +136,25 @@ export interface Diagnostics {
   kugou: { running: boolean; version: string | null; profile: string | null; error: string | null }
   ppt: { app: PptApp; connected: boolean }
   capabilities: Capability[]
+  playlist: PlaylistState
+}
+
+export interface PlaylistState {
+  name: string
+  route: 'A' | 'B' | null
+  supported: boolean
+  can_add: boolean
+  complete: boolean
+  note: string
+  add_note?: string
+  songs: Record<string, boolean | null>
+}
+
+export interface PlaylistAddResult {
+  status: 'added' | 'already_present' | 'unverified'
+  message: string
+  in_playlist: boolean | null
+  playlist: PlaylistState
 }
 
 export type PptApp = 'powerpoint' | 'wps'

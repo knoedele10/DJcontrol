@@ -71,8 +71,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* 1920×1080 全屏：页面本身不滚动，各栏内部滚动。PPT 默认约占 40% 宽度。 */
-.app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 14px; padding: 16px max(20px, env(safe-area-inset-right, 0px)) 16px max(20px, env(safe-area-inset-left, 0px)); max-width: 2560px; margin: 0 auto; }
+/* 1920×1080 全屏：页面本身不滚动，各栏内部滚动（min-height: 0 让面板压在一屏内）。PPT 默认约占 40% 宽度。 */
+.app { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 14px; padding: 16px max(20px, env(safe-area-inset-right, 0px)) 16px max(20px, env(safe-area-inset-left, 0px)); max-width: 2560px; margin: 0 auto; }
 .main { display: grid; grid-template-columns: 250px minmax(0, 1fr) minmax(0, 0.88fr); gap: 14px; min-height: 0; }
 .main.ppt-big { grid-template-columns: 220px minmax(0, 1fr) minmax(0, 1.45fr); }
 .main > * { min-height: 0; }
@@ -82,7 +82,8 @@ onBeforeUnmount(() => {
 .rstack > * { flex-shrink: 0; }
 @media (max-width: 1400px) { .main { grid-template-columns: 220px minmax(0, 1fr) minmax(0, 0.8fr); } }
 @media (max-width: 1080px), (max-height: 700px) {
-  .app { height: auto; min-height: 100%; }
+  /* 窄屏改为整页滚动：min-height: auto 让面板随内容长高，不再被压在一屏里导致各栏重叠 */
+  .app { height: auto; min-height: auto; }
   .main, .main.ppt-big { grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); }
   .side { grid-column: 1 / -1; }
   .main.ppt-big .rstack { grid-column: 1 / -1; order: -1; }

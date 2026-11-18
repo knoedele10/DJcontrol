@@ -50,9 +50,9 @@ async function toggleInCategory(songId: number) {
 </script>
 
 <template>
-  <section class="col" @scroll.capture="ui.closeGroupPopover()">
+  <section class="col" data-tour="browser" @scroll.capture="ui.closeGroupPopover()">
     <div class="col-h">
-      <div class="sbox">
+      <div class="sbox" data-tour="search">
         <span class="si" aria-hidden="true">⌕</span>
         <input
           id="song-search"

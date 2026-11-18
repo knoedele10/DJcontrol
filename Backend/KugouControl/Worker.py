@@ -59,18 +59,36 @@ def operate(line: str) -> dict:
         return {"error": "capability_unsupported", "message": "当前酷狗版本未验证，已停止发送按键", "data": before}
     if before.get("error") or not before.get("controls_ready"):
         return {"error": "player_unavailable", "message": before.get("error"), "data": before}
+    if action in ('playlist_refresh', 'playlist_add'):
+        from KugouControl import Playlist
+        try:
+            if action == 'playlist_refresh':
+                state = Playlist.inspect(before['hwnd'], options.get('playlist', ''))
+                result = {'playlist': Playlist.inspect_add(before['hwnd'], before['pid'], state)}
+            else:
+                result = {'result': Playlist.add_to_playlist(before['hwnd'], before['pid'], options['playlist'],
+                                                           options['title'], options.get('artist', ''))}
+        except Playlist.PlaylistUnsupported as exc:
+            return {'error': 'capability_unsupported', 'message': str(exc), 'data': read()}
+        except Playlist.TrackFailed as exc:
+            return {'error': 'player_command_failed', 'message': str(exc), 'data': read()}
+        return {'data': read(), **result}
     if action in ("play_track", "seek"):
         from KugouControl import Track
+        result = {}
         try:
             if action == "seek":
                 Track.seek(before["hwnd"], float(options["position"]))
             else:
-                Track.play_track(before["hwnd"], before["pid"], options["title"], options.get("artist", ""))
+                extra = {key: options[key] for key in ('playlist', 'in_playlist') if key in options}
+                played = Track.play_track(before["hwnd"], before["pid"], options["title"], options.get("artist", ""), **extra)
+                result = played if isinstance(played, dict) else {}
         except Track.TrackLoading as exc:
-            return {"error": "track_loading", "message": str(exc), "data": read()}
+            return {"error": "track_loading", "message": str(exc), "data": read(),
+                    'result': {'via': getattr(exc, 'via', 'search'), 'playlist_missed': getattr(exc, 'playlist_missed', False)}}
         except Track.TrackFailed as exc:
             return {"error": "player_command_failed", "message": str(exc), "data": read()}
-        return {"data": read(), "sent": True}
+        return {"data": read(), "sent": True, 'result': result}
     from KugouControl.Media import send
     send(action)
     from KugouControl.Uia import invalidate

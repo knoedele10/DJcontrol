@@ -17,7 +17,7 @@ const SHORTCUTS: [string, string][] = [
 </script>
 
 <template>
-  <footer class="transport">
+  <footer class="transport" data-tour="transport">
     <button class="ib side" :disabled="playback.busy || !playback.can(playback.controller === 'kugou' ? 'next' : 'play_track')" aria-label="上一首" title="上一首" @click="playback.controller === 'kugou' ? playback.mediaPrevious() : playback.previous()">⏮</button>
     <button class="big" :class="{ on: playback.playing }" :disabled="playback.busy || !playback.can('play_pause')" aria-label="播放或暂停" title="播放 / 暂停（空格）" @click="playback.toggle()">{{ playback.playing ? '❚❚' : '▶' }}</button>
     <button v-if="playback.controller === 'kugou'" :disabled="playback.busy || !playback.can('next')" @click="playback.mediaNext()">⏭ 酷狗下一首</button>

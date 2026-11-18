@@ -205,6 +205,7 @@ interface PlayerState {
   session: Session
   recent_history: HistoryItem[]  // 本场最近 20 条，新的在前
   error: string | null
+  via: 'playlist' | 'search' | null // 最近一次面板指定曲目的核验路径；模拟或外部切歌为 null
 }
 
 interface PlayerUpdate {
@@ -216,6 +217,9 @@ interface PlayerUpdate {
 队列和已播放进播放器状态里一起推送：它们和「正在播什么」总是一起变化，合并后前端只需处理一种消息。
 
 ### 3.6 诊断（已实现）
+
+`GET /api/connection` 返回 `{ mode: 'local' | 'proxy', backend_connected: boolean, upstream: string | null, message: string }`，独立于播放器命令检查 Windows 控制链路；代理上游探测最多 3 秒。后端断开仍返回 200 和 `backend_connected=false`，与 `/api/health` 的容器存活状态区分。网页每 10 秒检查一次并显示启动指引，设置页自检显示进度和完成时间；正在执行播放命令不会禁用只读自检按钮。
+
 ```ts
 interface Capability {
   name: string
@@ -230,6 +234,7 @@ interface Diagnostics {
   kugou: { running: boolean; version: string | null; profile: string | null; error: string | null }  // error：自检没通过的原因
   ppt: { app: PptApp; connected: boolean }
   capabilities: Capability[]
+  playlist: PlaylistState
 }
 ```
 
@@ -242,8 +247,39 @@ interface Diagnostics {
 | `read_position` | 读取播放进度 | 隐藏进度条，关闭自动接歌 |
 | `seek` | 跳转播放进度 | 进度条只显示，点击不跳转 |
 | `kugou_search` | 在酷狗里搜索 | 搜索只显示「曲库中」 |
+| `play_from_playlist` | 歌单内直接播放 | 保留搜索播放，设置页展示不可用原因 |
+| `add_to_playlist` | 逐首加入演出歌单 | 加歌按钮置灰；可手动维护歌单 |
 
-酷狗 10.2.52.25713 的运行时结论见 [KugouCapabilities.md](KugouCapabilities.md)：`read_state`、`play_pause`、`next`、`read_position`、`seek`、`play_track`、`kugou_search` 支持。酷狗的 `play_track` 一般 5–9 秒返回，最长约 24 秒，前端请求超时不要短于 30 秒；返回 409 且提示「还在连接」时歌可能稍后才开始播，开始后状态推送会带上 `song_id` 并更新队列。以 `/api/diagnostics` 实际返回为准。
+酷狗 10.2.52.25713 的既有运行时结论见 [KugouCapabilities.md](KugouCapabilities.md)。纯搜索播放的工作进程预算为 24 秒；启用歌单后为组合流程预留 44 秒，加歌为 48 秒，首次进程启动另预留 4 秒，前端播放器和诊断请求上限统一为 60 秒。返回 409 且提示「还在连接」时歌可能稍后才开始播，读到匹配歌曲实际 playing 后才补记队列和已播。歌单新能力仍需真机验证，以 `/api/diagnostics` 实际返回为准。
+
+### 3.7 演出歌单（代码已接入，真机待验收）
+
+```ts
+interface PlaylistState {
+  name: string                    // 空字符串表示关闭
+  route: 'A' | 'B' | null          // 可读歌曲列 / 歌单筛选 / 无可靠入口
+  supported: boolean
+  can_add: boolean
+  complete: boolean               // 是否完整读取；false 时不能把未读歌曲标为不在
+  note: string
+  add_note?: string
+  songs: Record<string, boolean | null> // 歌曲 ID -> 在 / 不在 / 未知；缺失也为未知
+}
+```
+
+| 方法 | 路径 | 请求体 | 响应 |
+|---|---|---|---|
+| GET | `/api/playlist` | – | `PlaylistState`；读取缓存，不操作酷狗页面 |
+| POST | `/api/playlist/refresh` | – | `PlaylistState`；使旧成员记录失效，重新探测歌单和加歌菜单 |
+| POST | `/api/playlist/tracks` | `{ song_id: number }` | `{ status: 'added' \| 'already_present' \| 'unverified', message, in_playlist: boolean \| null, playlist: PlaylistState }` |
+
+- 控制器设置增加可选 `playlist` 字符串（最多 100 字），省略或 null 保留原值，trim 后空字符串关闭；默认关闭。保存成功不代表歌单已可用。
+- 启动或切换到酷狗后，在窗口首次就绪时探测一次；失败保留基本搜索，用户可在设置页刷新。可识别入口为 supported，实际操作成功后对应能力才为 verified。
+- 成员信息存在 `playlist_tracks`，按歌单和歌曲 ID 关联，保存歌名/歌手快照；更换歌单清空，歌曲改名失效，删歌级联删除。刷新重新核验，不允许前端直接伪造“在歌单内”。
+- 播放优先尝试歌单；明确不存在只回退一次搜索。尚未点击歌曲且入口不可靠时使用搜索；播错、正在加载或操作异常不再次切歌。
+- 加歌属于准备操作：可能试听切歌，实际操作结束后核验暂停；不移除队列、不写已播。已有歌曲跳过，添加后必须重新核验成员；仅点击菜单不能算成功。
+- 加歌无法核验时返回 `200 status=unverified`，前端按失败显示且不标记已加入；不支持返回 409、不可用返回 503、隔离进程超时返回 504，均不自动重发。超时可能打断暂停步骤，需在酷狗中检查并手动暂停。
+- 加歌与播放器命令串行；其他操作执行中提交加歌返回 409。首版不提供批量加入、自动建歌单或自动下载。
 
 ---
 
@@ -384,7 +420,9 @@ interface PptUpdate {
 | WS | `/ws/player` | – | – | 推送 `PlayerUpdate` |
 | GET | `/api/diagnostics` | – | – | `Diagnostics` |
 | POST | `/api/diagnostics/refresh` | – | – | `Diagnostics`（重新自检） |
-| PUT | `/api/settings/controller` | `{ name: "mock" \| "kugou" }` | – | `Diagnostics` |
+| PUT | `/api/settings/controller` | `{ name: "mock" \| "kugou", playlist?: string \| null }` | – | `Diagnostics` |
+| GET | `/api/settings/tutorial` | – | – | `{ completed_version: number }`（0 = 从没看完） |
+| PUT | `/api/settings/tutorial` | `{ completed_version: number }`（0–1000 整数） | – | `{ completed_version: number }` |
 
 播放命令，与 `PptCommand` 同一风格：
 ```ts
@@ -399,6 +437,7 @@ type PlayerCommand =
 - 命令在后端串行执行，同一时刻只有一个命令操作酷狗；执行后重新读取酷狗状态再返回。
 - 读不到状态的能力只能做到「已发送」：返回成功，但 `state.error` 为空、`status` 为 `unknown`，前端显示「已发送（未核验）」。
 - 「快结束时自动接歌」由后端执行（酷狗模式下不可用：酷狗播完会自己接下一首，开启自动接歌的请求会被拒绝），前端只负责开关 `auto_next`。
+- 使用教程的完成版本存在 SQLite 设置 `ui.tutorial_version`：桌面版换端口、换浏览器后仍记得。前端同时在 localStorage 记一份，后端离线时也能判断；两处都没有达到当前教程版本才在打开面板时强制显示。
 
 ---
 
@@ -414,6 +453,7 @@ type PlayerCommand =
 | `Queue/QueueStore.ts` 队列 / 已播 | 后端接口；旧本地状态不再作为事实来源 | §8；状态来自 `/ws/player` |
 | `Playback/PlaybackStore.ts` | 前端计时模拟 | `/ws/player` 驱动；`report()` 跟随命令请求的成功 / 失败 |
 | `Pages/Settings/SettingsPage.vue` | **已接真实后端** | `GET /api/diagnostics`、`POST /api/diagnostics/refresh`、`PUT /api/settings/controller` |
+| `Tutorial/TutorialStore.ts` 使用教程 | **已接真实后端** | `GET` / `PUT /api/settings/tutorial` |
 
 类型对齐情况（2026-11-07 已完成）：
 - `Song.bpm`、`KugouResult.bpm` 为 `number | null`，显示用 `Common/Format.ts` 的 `fmtBpm`；`Song` 含 `note`。
@@ -438,6 +478,9 @@ type PlayerCommand =
 
 | 日期 | 版本 | 内容 |
 |---|---|---|
+| 2026-11-13 | v0.1.10 | 歌单配置、状态/刷新/逐首加歌接口与 `PlayerState.via` 接入；成员三态持久化，新增两项歌单能力；代码及自动化验证完成，真机待验收 |
+| 2026-11-13 | v0.1.11 | Docker 增加 Windows 控制服务启动/停止脚本和 `/api/connection`，网页明确显示上游断开原因，自检按钮独立于播放忙状态并显示进度 |
+| 2026-11-17 | v0.1.12 | 新增使用教程：首次打开面板强制显示、看完才记录；`GET` / `PUT /api/settings/tutorial` 保存完成版本，顶部「？ 教程」可随时重看 |
 | 2026-11-11 | v0.1.8 | PPT 页面绑定与翻页联动迁到后端：`PptUpdate` 增加 `bindings`、`link_music`、`link`；新增 `PUT /api/ppt/bindings/{slide}`、`PATCH /api/ppt/settings`、`POST /api/ppt/bindings/import` |
 | 2026-11-11 | v0.1.9 | M8 诊断与设置接入完成：控制器切换、酷狗/PPT 能力状态和 SQLite 设置持久化 |
 | 2026-11-11 | v0.1.7 | 酷狗搜索接入：`GET /api/search` 返回酷狗结果并新增 `source` 参数；`POST /api/songs/from-kugou` 可用；capability `kugou_search` 开放 |

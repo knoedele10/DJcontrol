@@ -227,8 +227,17 @@ export class BackendManager extends EventEmitter {
       this.updateStatus({ phase: 'error', message: '后端目录不完整', error: msg })
       throw new Error(msg)
     }
+    if (this.paths.isPackaged && !this.exists(this.paths.pythonExecutable)) {
+      const msg = `未找到内置 Python 运行时（${this.paths.pythonExecutable}），请重新安装应用。`
+      this.updateStatus({ phase: 'error', message: '内置运行环境缺失', error: msg })
+      throw new Error(msg)
+    }
 
     this.mkdir(this.paths.logsDir)
+    const cacheDir = this.paths.cacheDir || path.join(path.dirname(this.paths.logsDir), 'cache')
+    if (this.paths.isPackaged) {
+      this.mkdir(cacheDir)
+    }
     const port = this.options.devMode
       ? this.options.preferredPort
       : await this.findPort(this.options.preferredPort, '127.0.0.1')
@@ -252,6 +261,20 @@ export class BackendManager extends EventEmitter {
       KGDASH_PORT: String(port),
       KGDASH_BACKEND_DIR: this.paths.backendDir,
       DB_PATH: this.paths.dbPath,
+    }
+    if (this.paths.isPackaged) {
+      // 打包版隔离宿主机 Python 与开发/代理环境变量，避免切入代理模式或污染依赖/缓存路径。
+      delete env.PYTHONHOME
+      delete env.PYTHONPATH
+      delete env.PYTHONSTARTUP
+      delete env.PYTHONUSERBASE
+      delete env.API_UPSTREAM
+      delete env.ELECTRON_DEV
+      delete env.KGDASH_DEV
+      delete env.KGDASH_DEV_URL
+      env.PYTHONNOUSERSITE = '1'
+      env.PYTHONDONTWRITEBYTECODE = '1'
+      env.KGDASH_CACHE_DIR = cacheDir
     }
     if (this.options.devMode) {
       delete env.FRONTEND_DIST

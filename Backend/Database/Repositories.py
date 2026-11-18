@@ -106,6 +106,36 @@ class SongRepository:
             return cursor.rowcount > 0
 
 
+class PlaylistRepository:
+    """按歌单和歌曲保存三态结果；名称快照使曲目信息变化自动失效。"""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    def list(self, playlist: str) -> dict[int, bool | None]:
+        return {int(row['song_id']): None if row['in_playlist'] is None else bool(row['in_playlist'])
+                for row in self.database.query_all(
+                    'SELECT p.song_id, p.in_playlist FROM playlist_tracks p JOIN songs s ON s.id = p.song_id '
+                    'WHERE p.playlist = ? AND p.title = s.title AND p.artist = s.artist', (playlist,))}
+
+    def set(self, playlist: str, song: dict, present: bool | None) -> None:
+        with self.database.transaction() as connection:
+            # 核验期间用户可能改名或删歌，旧命令不能写回新歌曲的状态。
+            connection.execute(
+                'INSERT INTO playlist_tracks (playlist, song_id, title, artist, in_playlist, checked_at) '
+                'SELECT ?, id, title, artist, ?, ? FROM songs WHERE id = ? AND title = ? AND artist = ? '
+                'ON CONFLICT(playlist, song_id) DO UPDATE SET title = excluded.title, artist = excluded.artist, '
+                'in_playlist = excluded.in_playlist, checked_at = excluded.checked_at',
+                (playlist, present, _now(), song['id'], song['title'], song['artist']))
+
+    def clear(self, playlist: str | None = None) -> None:
+        with self.database.transaction() as connection:
+            if playlist is None:
+                connection.execute('DELETE FROM playlist_tracks')
+            else:
+                connection.execute('DELETE FROM playlist_tracks WHERE playlist = ?', (playlist,))
+
+
 class LibraryRepository:
     """读取活动组及其有序分类；歌曲归属单独存于关联表。"""
 

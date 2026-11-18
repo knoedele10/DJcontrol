@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import urllib.error
 import urllib.request
 from contextlib import suppress
@@ -85,6 +86,21 @@ def _upstream_unavailable(upstream: str, exc: BaseException) -> JSONResponse:
             }
         },
     )
+
+
+async def connection_status(upstream: str) -> dict:
+    """控制链路就绪检查独立于容器存活检查，不持有播放器锁，也不操作窗口。"""
+    connected = False
+    try:
+        status, _, content = await asyncio.to_thread(
+            _forward_blocking, 'GET', upstream + '/api/health', [], b'', 3.0)
+        health = json.loads(content)
+        connected = status == 200 and health.get('status') == 'ok' and health.get('mode') != 'proxy'
+    except (urllib.error.URLError, OSError, ValueError, AttributeError):
+        pass
+    return {'mode': 'proxy', 'backend_connected': connected, 'upstream': upstream,
+            'message': 'Windows 控制服务已连接' if connected else
+                '网页容器已启动，但连不上 Windows 控制服务。请在运行酷狗的电脑启动 Scripts/StartDocker.ps1，或检查后端端口与监听地址。'}
 
 
 async def forward_http(request: Request, upstream: str, timeout: float = 120.0) -> Response:

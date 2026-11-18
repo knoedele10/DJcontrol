@@ -6,10 +6,12 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, WebSocket, WebSocketDisconnect
 
-from Player.Model import ControllerSettings, PlayerCommand, PlayerSettings, QueueCreate, QueueOrder
+from Database import SettingsRepository
+from Player.Model import ControllerSettings, PlaylistAdd, PlayerCommand, PlayerSettings, QueueCreate, QueueOrder, TutorialProgress
 from Player.Service import PlayerConflict, PlayerError, PlayerNotFound, PlayerService
 
 router = APIRouter()
+TUTORIAL_KEY = "ui.tutorial_version"
 
 
 def player(request: Request) -> PlayerService:
@@ -63,8 +65,42 @@ async def refresh_diagnostics(request: Request) -> dict:
 @router.put("/api/settings/controller")
 async def controller_settings(body: ControllerSettings, request: Request) -> dict:
     try:
-        await player(request).switch_controller(body.name)
+        await player(request).switch_controller(body.name, body.playlist)
         return await diagnostics(request)
+    except PlayerError as exc:
+        raise error_response(exc) from exc
+
+
+@router.get("/api/settings/tutorial")
+async def tutorial_progress(request: Request) -> dict:
+    # 存在后端而不是浏览器：桌面版换端口、换浏览器打开面板时，仍记得教程已经看过。
+    value = SettingsRepository(request.app.state.db).get(TUTORIAL_KEY, 0)
+    return {"completed_version": value if type(value) is int and value >= 0 else 0}
+
+
+@router.put("/api/settings/tutorial")
+async def save_tutorial_progress(body: TutorialProgress, request: Request) -> dict:
+    SettingsRepository(request.app.state.db).set(TUTORIAL_KEY, body.completed_version)
+    return {"completed_version": body.completed_version}
+
+
+@router.get('/api/playlist')
+async def playlist_state(request: Request) -> dict:
+    return await player(request).playlist()
+
+
+@router.post('/api/playlist/refresh')
+async def refresh_playlist(request: Request) -> dict:
+    try:
+        return await player(request).refresh_playlist()
+    except PlayerError as exc:
+        raise error_response(exc) from exc
+
+
+@router.post('/api/playlist/tracks')
+async def add_playlist_track(body: PlaylistAdd, request: Request) -> dict:
+    try:
+        return await player(request).add_to_playlist(body.song_id)
     except PlayerError as exc:
         raise error_response(exc) from exc
 

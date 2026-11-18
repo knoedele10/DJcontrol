@@ -11,10 +11,10 @@ from typing import Callable
 
 from Player.Base import CapabilityUnsupported, ControllerCommandFailed, ControllerCommandPending, ControllerTimeout, ControllerTrackLoading, PlayerController, PlayerReading, PlayerUnavailable
 from KugouControl.Process import WorkerProcess
-from KugouControl.Profiles import same_track
+from KugouControl.Profiles import exact_track, same_track
 
 logger = logging.getLogger(__name__)
-PLAY_TRACK_TIMEOUT = 24  # 比前端请求超时（30 秒）短，超时也由后端给出明确原因
+PLAY_TRACK_TIMEOUT = 24
 
 
 class KugouController(PlayerController):
@@ -26,10 +26,59 @@ class KugouController(PlayerController):
         self.info: dict = {}
         self._pending: tuple[str, dict] | None = None
         self._track: dict | None = None  # 面板最近一次指定播放的曲库歌曲，用来把酷狗标题对回曲库
+        self._playlist = self._empty_playlist('')
+        self._playlist_checked = False
+        self.last_result: dict = {}
+        self.play_result: dict = {}
+        self._via: str | None = None
+
+    @staticmethod
+    def _empty_playlist(name):
+        return {'name': name, 'route': None, 'supported': False, 'can_add': False,
+                'tracks': [], 'complete': False, 'note': '尚未检测，请在设置页刷新歌单' if name else '未启用歌单',
+                'add_note': '尚未检测加歌菜单'}
+
+    def configure_playlist(self, name: str) -> None:
+        if name != self._playlist['name']:
+            self._playlist = self._empty_playlist(name)
+            self._playlist_checked = False
+
+    def playlist_snapshot(self) -> dict:
+        return dict(self._playlist)
+
+    def refresh_playlist(self) -> dict:
+        name = self._playlist['name']
+        self._playlist_checked = True
+        self._playlist = self._empty_playlist(name)
+        if name:
+            try:
+                self._exchange('playlist_refresh ' + json.dumps({'playlist': name}, ensure_ascii=False))
+                state = self.last_result.get('playlist')
+                if not isinstance(state, dict):
+                    raise PlayerUnavailable('歌单探测没有返回有效结果')
+                self._playlist = state
+            except Exception as exc:
+                self._playlist['note'] = str(exc)
+                raise
+        return self.playlist_snapshot()
+
+    def add_to_playlist(self, song: dict) -> dict:
+        if not self._playlist['can_add']:
+            raise CapabilityUnsupported(self._playlist.get('add_note', 'add_to_playlist'))
+        self._pending = self._track = None
+        self._via = None
+        self._exchange('playlist_add ' + json.dumps({'playlist': self._playlist['name'],
+                       'title': song['title'], 'artist': song['artist']}, ensure_ascii=False))
+        result = self.last_result.get('result', {'status': 'unverified', 'message': '加歌结果未核验', 'in_playlist': None})
+        if result.get('status') == 'added':
+            self._playlist['add_verified'] = True
+        return result
 
     def _exchange(self, action: str) -> dict:
         # 搜歌要等结果页和歌曲加载，没缓存的歌最长等十几秒；其余操作一两秒内完成。
-        timeout = {"read": self.timeout, "play_track": max(self.timeout * 2, PLAY_TRACK_TIMEOUT)}.get(
+        playlist_play = action.startswith('play_track ') and bool(json.loads(action.partition(' ')[2]).get('playlist'))
+        timeout = {"read": self.timeout, "play_track": 44 if playlist_play else max(self.timeout * 2, PLAY_TRACK_TIMEOUT),
+                   'playlist_refresh': 20, 'playlist_add': 48}.get(
             action.partition(" ")[0], self.timeout * 2)
         try:
             child = self._runner(
@@ -42,10 +91,11 @@ class KugouController(PlayerController):
             if child.returncode or not isinstance(payload, dict):
                 raise ValueError("worker failed")
             self.info = payload.get("data", {})
+            self.last_result = payload
             if child.stderr:
                 logger.debug("酷狗探测日志：%s", child.stderr)
             if payload.get("error") == "capability_unsupported":
-                raise CapabilityUnsupported("play_pause/next：当前版本未验证")
+                raise CapabilityUnsupported(payload.get('message', '当前版本未验证'))
             if payload.get("error") == "track_loading":
                 raise ControllerTrackLoading(payload["message"])
             if payload.get("error") == "player_command_failed":
@@ -56,7 +106,9 @@ class KugouController(PlayerController):
                 raise PlayerUnavailable(payload.get("message", "酷狗命令未核验"))
             return self.info
         except subprocess.TimeoutExpired as exc:
-            self.info = {"error": "酷狗读取/操作超时，请检查窗口；命令不会自动重试"}
+            message = ('加歌超时，结果和播放状态尚未核验，请在酷狗中检查并暂停；不会自动重试'
+                       if action.startswith('playlist_add ') else '酷狗读取/操作超时，请检查窗口；命令不会自动重试')
+            self.info = {"error": message}
             raise ControllerTimeout(self.info["error"]) from exc
         except (OSError, ValueError) as exc:
             logger.exception("酷狗隔离进程不可用")
@@ -68,7 +120,9 @@ class KugouController(PlayerController):
         # 自检没通过时，四项实读/媒体键能力都写同一个原因，设置页能直接看到为什么不可用。
         down = self.info.get("error") or "等待酷狗连接自检"
         return [
-            {"name": name, "label": label, "supported": supported, "verified": supported, "note": note}
+            {"name": name, "label": label, "supported": supported,
+             "verified": supported and (self._playlist.get('play_verified', False) if name == 'play_from_playlist'
+                                         else self._playlist.get('add_verified', False) if name == 'add_to_playlist' else True), "note": note}
             for name, label, supported, note in (
                 ("read_state", "读取当前曲目", ready, "窗口标题与播放栏实读" if ready else down),
                 ("play_pause", "播放 / 暂停", ready, "媒体键；每条命令执行后核验，不自动重试" if ready else down),
@@ -78,33 +132,60 @@ class KugouController(PlayerController):
                 ("play_track", "按歌名搜索并播放", ready,
                  "在酷狗搜「歌名 歌手」播单曲第一条，按窗口标题核验；不抢焦点，一般 5–8 秒；网络慢时先提示‘还在连接’，播出来后面板自动更新" if ready else down),
                 ("kugou_search", "酷狗搜索", True, "查酷狗的网络搜索接口，不操作酷狗窗口；结果可直接播、排队或收进曲库"),
+                ('play_from_playlist', '歌单内直接播放', ready and self._playlist['supported'], self._playlist['note'] if ready else down),
+                ('add_to_playlist', '加入演出歌单', ready and self._playlist['can_add'], self._playlist['add_note'] if ready else down),
             )
         ]
 
     def get_state(self) -> PlayerReading:
         try:
             info = self._exchange("read")
+            if (not self._playlist_checked and self._playlist['name'] and not self._playlist['supported']
+                    and info.get('controls_ready') and not info.get('error')):
+                try:
+                    self.refresh_playlist()
+                    info = self.info
+                except (CapabilityUnsupported, ControllerCommandFailed, ControllerTimeout, PlayerUnavailable) as exc:
+                    # 歌单探测失败不影响已核验过的基本播放能力。
+                    logger.warning('歌单初始化不可用：%s', exc)
+                    self.info = info
             track = self._track
-            if track and info.get("title") and not same_track(info["title"], info.get("artist", ""), track["title"], track["artist"]):
+            matches = exact_track if self._via == 'playlist' else same_track
+            if track and info.get("title") and not matches(info["title"], info.get("artist", ""), track["title"], track["artist"]):
                 track = self._track = None  # 酷狗已经换歌，不再对应面板指定的那首
+                self._via = None
+            if track and self._via == 'playlist' and info.get('title') and info.get('status') == 'playing':
+                self._playlist['play_verified'] = True
             return PlayerReading(connected=info.get("connected", False), status=info.get("status", "unknown"),
                                  title=info.get("title", ""), artist=info.get("artist", ""),
                                  song_id=track["id"] if track and info.get("title") else None,
-                                 position=info.get("position"), duration=info.get("duration"), error=info.get("error"))
+                                 position=info.get("position"), duration=info.get("duration"), error=info.get("error"),
+                                 via=self._via if track else None)
         except (ControllerTimeout, PlayerUnavailable) as exc:
             return PlayerReading(connected=False, status="unknown", error=str(exc))
 
     def play_track(self, song: dict) -> None:
         self._pending = None
         self._track = None
+        self._via = None
+        self.play_result = {}
         title, artist = song.get("title") or "", song.get("artist") or ""
         track = {"id": song.get("id"), "title": title, "artist": artist}
+        options = {'title': title, 'artist': artist}
+        if self._playlist['supported']:
+            options.update(playlist=self._playlist['name'], in_playlist=song.get('in_playlist'))
         try:
-            self._exchange("play_track " + json.dumps({"title": title, "artist": artist}, ensure_ascii=False))
+            self._exchange("play_track " + json.dumps(options, ensure_ascii=False))
         except ControllerTrackLoading:
             self._track = track  # 还在连接：等标题出来，对得上就认这首
+            self._via = self.last_result.get('result', {}).get('via', 'search')
+            self.play_result = dict(self.last_result.get('result', {}))
             raise
         self._track = track
+        self._via = self.last_result.get('result', {}).get('via', 'search')
+        self.play_result = dict(self.last_result.get('result', {}))
+        if self._via == 'playlist':
+            self._playlist['play_verified'] = True
 
     def seek(self, position: float) -> None:
         self._pending = None

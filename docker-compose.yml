@@ -1,5 +1,6 @@
 # 容器只出界面，/api 与 /ws 转发给 Windows 上的 COM 宿主。
-# Windows 侧先启动后端（见 Docs/BackendGuide.md §2.5），端口要和 API_UPSTREAM 一致。
+# 推荐 .\Scripts\StartDocker.ps1 同时启动两端；Compose 自身不能启动 Windows 控制服务。
+# 手动启动用 .\Scripts\StartBackend.ps1 -Docker（0.0.0.0:8081），端口须与 API_UPSTREAM 一致。
 services:
   dashboard:
     build:

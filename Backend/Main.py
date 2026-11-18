@@ -12,7 +12,7 @@ from Player.Api import router as player_router
 from PptControl.Api import router as ppt_router
 from Database import Database, SettingsRepository
 from Proxy import install as install_proxy
-from Proxy import normalize_upstream
+from Proxy import connection_status, normalize_upstream
 from Library.Service import LibraryService
 from Player.Service import PlayerService
 from PptControl.Link import PptLink
@@ -94,6 +94,12 @@ def create_app(
         if configured:
             return {"status": "ok", "mode": "proxy", "upstream": configured}
         return {"status": "ok"}
+
+    @application.get('/api/connection')
+    async def connection() -> dict:
+        if configured:
+            return await connection_status(configured)
+        return {'mode': 'local', 'backend_connected': True, 'upstream': None, 'message': '本地控制服务已连接'}
 
     if configured:
         # 具体路由 /api/health 先注册，catch-all 才能把其余接口转发出去。

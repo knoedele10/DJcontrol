@@ -3,11 +3,13 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { usePlaybackStore } from '@/Playback/PlaybackStore'
 import { useLibraryStore } from '@/Library/LibraryStore'
+import { useTutorialStore } from '@/Tutorial/TutorialStore'
 
 import { fmtBpm, fmtTime } from '@/Common/Format'
 
 const playback = usePlaybackStore()
 const library = useLibraryStore()
+const tutorial = useTutorialStore()
 
 const clock = ref('')
 const updateClock = () => (clock.value = new Date().toTimeString().slice(0, 5))
@@ -33,7 +35,7 @@ function subtitle() {
 </script>
 
 <template>
-  <header class="status">
+  <header class="status" data-tour="status">
     <div class="disc" :class="{ spin: playback.playing }"><i></i></div>
     <div style="min-width: 0">
       <div class="np-title">{{ playback.title || playback.current?.title || '未在播放' }}</div>
@@ -52,7 +54,8 @@ function subtitle() {
       <span v-if="playback.controller === 'mock'" class="chip warn">模拟播放器 · 状态由后端驱动</span>
       <div style="display: flex; gap: 6px; align-items: center">
         <span class="chip mute mono">{{ clock }}</span>
-        <RouterLink to="/settings" class="chip mute set">⚙ 设置</RouterLink>
+        <button type="button" class="chip mute set" data-tour="help" title="重新查看使用教程" @click="tutorial.start()">？ 教程</button>
+        <RouterLink to="/settings" class="chip mute set" data-tour="settings">⚙ 设置</RouterLink>
       </div>
     </div>
   </header>

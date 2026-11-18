@@ -14,6 +14,16 @@ def configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--values", action="store_true", help="读取数值 pattern，可能较慢")
 
 
+def readable_edit(info: Any) -> bool:
+    """歌单筛选框可能没有名称；同时继续排除密码与明显的账户设置字段。"""
+    if info.name in ('用户名', '账号', '账户', '密码', '代理地址', '端口'):
+        return False
+    try:
+        return not info.element.CurrentIsPassword
+    except Exception:
+        return False
+
+
 def read(args: argparse.Namespace) -> dict[str, Any]:
     from pywinauto import Desktop
 
@@ -44,7 +54,7 @@ def read(args: argparse.Namespace) -> dict[str, Any]:
                       "enabled": info.enabled, "visible": info.visible,
                       "rect": [rect.left, rect.top, rect.right, rect.bottom]}
         read_value = (node["control_type"] == "Slider"
-                      or (node["control_type"] == "Edit" and node["name"] == "搜索")
+                      or (node["control_type"] == "Edit" and readable_edit(info))
                       or (node["control_type"] == "Text" and " - " in node["name"]))
         if args.values and args.backend == "uia" and node["visible"] and read_value:
             for pattern, fields in (("iface_value", ("CurrentValue",)),

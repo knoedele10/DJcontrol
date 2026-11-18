@@ -10,13 +10,14 @@ from typing import Any, Callable, Literal
 
 from Player.Base import CapabilityUnsupported, ControllerCommandFailed, ControllerCommandPending, ControllerTimeout, ControllerTrackLoading, PlayerController, PlayerReading, PlayerUnavailable
 from Player.Mock import MockPlayerController
-from Database import Database, QueueRepository, SessionRepository, SettingsRepository, SongRepository
+from Database import Database, PlaylistRepository, QueueRepository, SessionRepository, SettingsRepository, SongRepository
 from Player.Model import PlayerCommand
 
 logger = logging.getLogger(__name__)
 
 AUTO_NEXT_KEY = "player.auto_next"
 CONTROLLER_KEY = "player.controller"
+PLAYLIST_KEY = 'player.playlist'
 
 
 class PlayerError(Exception):
@@ -59,6 +60,7 @@ class PlayerState:
     recent_history: tuple[dict[str, Any], ...] = ()
     error: str | None = None
     capabilities: tuple[dict, ...] = ()
+    via: Literal['playlist', 'search'] | None = None
 
 
 class PlayerService:
@@ -96,6 +98,7 @@ class PlayerService:
         # 播放器点开了歌但还在加载（酷狗连接慢）：先不动队列和已播，读到这首歌真的在播再补记。
         # 第三项是这首歌在已播里的位置：新点的歌还没记进已播，记 -1。
         self._loading: tuple[int, Callable[[], None], int] | None = None
+        self._playlist_cache = None
 
     @staticmethod
     def _factory_for(name: str) -> Callable[[], PlayerController]:
@@ -110,6 +113,7 @@ class PlayerService:
     def _controller_for_thread(self) -> PlayerController:
         if self._controller is None:
             self._controller = self._factory()
+            self._controller.configure_playlist(SettingsRepository(self.database).get(PLAYLIST_KEY, ''))
         return self._controller
 
     def _ensure_session(self) -> dict[str, Any]:
@@ -130,13 +134,14 @@ class PlayerService:
     def _read_state(self) -> PlayerState:
         controller = self._controller_for_thread()
         reading: PlayerReading = controller.get_state()
+        self._remember_playlist_snapshot(controller)
         capabilities = controller.capabilities()
         if self._loading:
             song_id, commit, _ = self._loading
-            if reading.song_id == song_id:
+            if reading.song_id == song_id and reading.status == 'playing':
                 self._loading = None
                 commit()
-            elif reading.title or not reading.connected:
+            elif (reading.title and reading.song_id != song_id) or not reading.connected:
                 self._loading = None  # 播出来的是别的歌，或播放器断开了
         if reading.status == "playing" and reading.song_id is not None:
             self._armed_song = reading.song_id
@@ -159,6 +164,7 @@ class PlayerService:
             recent_history=self._public_history(history),
             error=reading.error,
             capabilities=tuple(capabilities),
+            via=reading.via,
         )
 
     def snapshot(self) -> dict:
@@ -211,8 +217,15 @@ class PlayerService:
         song = songs.get(song_id)
         if song is None:
             raise PlayerNotFound("歌曲不存在")
+        playlist = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
+        song = {**song, 'in_playlist': PlaylistRepository(self.database).list(playlist).get(song_id)}
+        result = {}
 
         def commit() -> None:
+            if playlist and result.get('via') == 'playlist':
+                PlaylistRepository(self.database).set(playlist, song, True)
+            elif playlist and result.get('playlist_missed'):
+                PlaylistRepository(self.database).set(playlist, song, False)
             self._armed_song = song_id
             QueueRepository(self.database).remove_song(song_id)
             if back_steps is None:
@@ -228,6 +241,8 @@ class PlayerService:
         except ControllerTrackLoading:
             self._loading = (song_id, commit, -1 if back_steps is None else back_steps)
             raise
+        finally:
+            result.update(getattr(self._controller_for_thread(), 'play_result', {}))
         commit()
 
     def _play_previous(self) -> None:
@@ -365,10 +380,11 @@ class PlayerService:
                 controller = self._controller_for_thread()
                 info = getattr(controller, "info", {})
                 return {"controller": self.controller_name, "capabilities": controller.capabilities(),
+                        'playlist': self._playlist_view(),
                         "kugou": {"running": info.get("running", False), "version": info.get("version"), "profile": info.get("profile"), "error": info.get("error")}}
             return await self._run(collect)
 
-    async def switch_controller(self, name: Literal["mock", "kugou"]) -> dict:
+    async def switch_controller(self, name: Literal["mock", "kugou"], playlist: str | None = None) -> dict:
         if name not in ("mock", "kugou"):
             raise ValueError("播放器必须为 mock 或 kugou")
         async with self._lock:
@@ -380,9 +396,96 @@ class PlayerService:
                 self._back_steps = 0
                 self._loading = None
                 SettingsRepository(self.database).set(CONTROLLER_KEY, name)
+                if playlist is not None:
+                    configured = playlist.strip()
+                    if configured != SettingsRepository(self.database).get(PLAYLIST_KEY, ''):
+                        PlaylistRepository(self.database).clear()
+                    SettingsRepository(self.database).set(PLAYLIST_KEY, configured)
                 return self._read_state()
             self._publish(await self._run(switch))
             return self.snapshot()
+
+    def _playlist_view(self) -> dict:
+        name = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
+        status = self._controller_for_thread().playlist_snapshot()
+        return {**{key: value for key, value in status.items() if key != 'tracks'}, 'name': name,
+                'songs': PlaylistRepository(self.database).list(name)}
+
+    def _remember_playlist_snapshot(self, controller: PlayerController) -> None:
+        state = controller.playlist_snapshot()
+        tracks = state.get('tracks', [])
+        token = (id(controller), state.get('name'), state.get('route'), state.get('complete'),
+                 tuple((t['title'], t['artist']) for t in tracks))
+        if token == self._playlist_cache or not state.get('supported'):
+            return
+        self._playlist_cache = token
+        self._record_playlist_members(state)
+
+    def _record_playlist_members(self, state: dict) -> None:
+        from KugouControl.Profiles import exact_track
+        name = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
+        if not name:
+            return
+        repository = PlaylistRepository(self.database)
+        for song in SongRepository(self.database).list():
+            present = any(exact_track(t['title'], t['artist'], song['title'], song['artist'])
+                          for t in state.get('tracks', []))
+            if present or state.get('complete'):
+                repository.set(name, song, present)
+
+    async def playlist(self) -> dict:
+        async with self._lock:
+            return await self._run(self._playlist_view)
+
+    async def _playlist_call(self, operation: Callable) -> dict:
+        try:
+            return await self._run(operation)
+        except CapabilityUnsupported as exc:
+            raise PlayerUnsupported(str(exc)) from exc
+        except ControllerTimeout as exc:
+            raise PlayerTimedOut(str(exc)) from exc
+        except PlayerUnavailable as exc:
+            raise PlayerDisconnected(str(exc)) from exc
+        except ControllerCommandFailed as exc:
+            raise PlayerConflict(str(exc)) from exc
+        finally:
+            try:
+                self._publish(await self._run(self._read_state))
+            except Exception:
+                logger.exception('歌单操作后的状态读取失败')
+
+    async def refresh_playlist(self) -> dict:
+        async with self._lock:
+            def refresh():
+                name = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
+                repository = PlaylistRepository(self.database)
+                repository.clear(name)
+                state = self._controller_for_thread().refresh_playlist()
+                self._record_playlist_members(state)
+                return self._playlist_view()
+            return await self._playlist_call(refresh)
+
+    async def add_to_playlist(self, song_id: int) -> dict:
+        # 不排队重放加歌请求：双击或并发请求应得到明确冲突。
+        if self._lock.locked():
+            raise PlayerConflict('播放器正在执行其他操作，请稍后再加入歌单')
+        async with self._lock:
+            def add():
+                song = SongRepository(self.database).get(song_id)
+                if song is None:
+                    raise PlayerNotFound('歌曲不存在')
+                controller = self._controller_for_thread()
+                status = controller.playlist_snapshot()
+                name = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
+                if not name or not status.get('can_add'):
+                    raise PlayerUnsupported(status.get('add_note', '请配置歌单并完成加歌能力检测'))
+                self._loading = None
+                self._armed_song = None
+                PlaylistRepository(self.database).set(name, song, None)
+                result = controller.add_to_playlist(song)
+                PlaylistRepository(self.database).set(name, song, result.get('in_playlist'))
+                return {**result, 'playlist': self._playlist_view()}
+            return await self._playlist_call(add)
 
     async def start_session(self) -> dict:
         async with self._lock:

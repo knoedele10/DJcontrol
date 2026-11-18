@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "酷狗统筹面板桌面应用外壳（Electron）",
+  "author": "knoedele10",
   "main": "dist/Main.js",
   "type": "module",
   "scripts": {
@@ -11,8 +12,9 @@
     "start": "pnpm run build && node Scripts/RunElectron.mjs",
     "dev": "pnpm run build && node Scripts/RunElectron.mjs --dev",
     "test": "pnpm run typecheck && pnpm run build && node --test Tests/*.mjs",
-    "pack": "pnpm run build && electron-builder --dir",
-    "dist": "pnpm run build && electron-builder --win"
+    "prepare:bundle": "python Scripts/PrepareBundle.py",
+    "pack": "pnpm run build && pnpm run prepare:bundle && electron-builder --dir",
+    "dist": "pnpm run build && pnpm run prepare:bundle && electron-builder --win"
   },
   "build": {
     "appId": "com.kugoudashboard.desktop",
@@ -37,21 +39,12 @@
         "to": "frontend"
       },
       {
-        "from": "../Backend",
-        "to": "backend",
-        "filter": [
-          "**/*",
-          "!Data/**",
-          "!Tests/**",
-          "!.venv/**",
-          "!.pytest_cache/**",
-          "!.audit-tmp/**",
-          "!tmp*/**",
-          "!**/__pycache__/**",
-          "!**/*.pyc",
-          "!**/*.log",
-          "!**/*.db*"
-        ]
+        "from": ".bundle/backend",
+        "to": "backend"
+      },
+      {
+        "from": ".bundle/python",
+        "to": "python"
       }
     ],
     "win": {
@@ -59,11 +52,16 @@
         "dir",
         "nsis"
       ],
-      "icon": "Assets/Icon.ico"
+      "icon": "Assets/Icon.ico",
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "酷狗统筹面板"
     }
   },
   "devDependencies": {

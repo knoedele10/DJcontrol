@@ -34,11 +34,18 @@ async function addToLibrary() {
   const btn = document.querySelector<HTMLElement>(`[data-song-card="${id}"] [aria-label="设置分组"]`)
   if (btn) ui.openGroupPopover(id, btn)
 }
+async function addToPlaylist() {
+  if (playback.busy) return
+  const id = await library.ensureInLibrary(props.result)
+  if (id !== null) await playback.addPlaylistSong(id)
+}
 </script>
 
 <template>
   <div class="card kg" :class="{ first }" role="button" tabindex="0" title="单击加入队列（会自动收进曲库，未分组）" @click="enqueue()" @keydown.enter.self="enqueue()">
     <div class="acts">
+      <button v-if="playback.controller === 'kugou'" class="ib" :disabled="!playback.can('add_to_playlist') || playback.busy"
+        title="收录并加入演出歌单（会试听切歌，完成后暂停）" aria-label="加入演出歌单" @click.stop="addToPlaylist">♫＋</button>
       <button class="ib" title="收进曲库并设置分组" aria-label="收进曲库并设置分组" @click.stop="addToLibrary">＋</button>
       <button class="ib" title="插到下一首" aria-label="插到下一首" @click.stop="enqueue(true)">⤒</button>
       <button class="ib go" title="立即播放" aria-label="立即播放" @click.stop="playNow">▶</button>

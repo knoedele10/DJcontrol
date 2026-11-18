@@ -13,7 +13,7 @@ if (process.platform === 'win32') {
 }
 
 const desktopRoot = path.resolve(import.meta.dirname, '..')
-const options = parseDesktopOptions()
+const options = parseDesktopOptions(process.argv.slice(1), process.env, app.isPackaged)
 const paths = resolveDesktopPaths({
   isPackaged: app.isPackaged,
   desktopRoot,

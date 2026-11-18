@@ -648,3 +648,30 @@ class KugouServiceTests(unittest.TestCase):
                 await service.close(); db.close()
             self.assertEqual(len(set(fake.threads)), 1)
         asyncio.run(scenario())
+
+    def test_version_discover_clears_last_error_and_continues_enumeration(self):
+        import ctypes
+        import win32gui
+        from KugouControl import Version
+
+        observed_errors: list[int] = []
+        callback_results: list[object] = []
+
+        def fake_enum_windows(visit, _param):
+            observed_errors.append(ctypes.windll.kernel32.GetLastError())
+            callback_results.append(visit(101, None))
+            callback_results.append(visit(102, None))
+
+        classes = {101: "OtherClass", 102: Version.MAIN_CLASS}
+        ctypes.windll.kernel32.SetLastError(126)
+        try:
+            with patch.object(win32gui, "EnumWindows", side_effect=fake_enum_windows), \
+                 patch.object(win32gui, "GetClassName", side_effect=lambda hwnd: classes[hwnd]), \
+                 patch.object(win32gui, "GetWindowText", return_value="桌面歌词 - 酷狗音乐"):
+                result = Version.discover()
+        finally:
+            ctypes.windll.kernel32.SetLastError(0)
+
+        self.assertEqual(observed_errors, [0])
+        self.assertEqual(callback_results, [True, True])
+        self.assertIn("error", result)

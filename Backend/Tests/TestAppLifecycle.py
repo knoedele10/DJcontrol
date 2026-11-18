@@ -29,7 +29,7 @@ class AppLifecycleTests(unittest.TestCase):
             self.assertEqual(client.get("/api/health").json(), {"status": "ok"})
             self.assertIs(client.app.state.db, database)
             self.assertEqual(database.query_one("SELECT COUNT(*) FROM songs")[0], 28)
-            self.assertEqual(database.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 1)
+            self.assertEqual(database.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 2)
         with self.assertRaisesRegex(Exception, "closed"):
             database.query_one("SELECT 1")
 
@@ -71,7 +71,7 @@ class AppLifecycleTests(unittest.TestCase):
 
             second = Database(path)
             second.connect()
-            self.assertEqual(second.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 1)
+            self.assertEqual(second.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 2)
             self.assertEqual(second.query_one("SELECT COUNT(*) FROM songs")[0], 28)
             second.close()
 

@@ -27,9 +27,9 @@ class DatabaseTests(unittest.TestCase):
         self.database.close()
 
     def test_migrations_are_recorded_and_idempotent(self) -> None:
-        self.assertEqual(self.database.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 1)
+        self.assertEqual(self.database.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 2)
         self.database._migrate(self.database.connection)
-        self.assertEqual(self.database.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 1)
+        self.assertEqual(self.database.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 2)
         tables = {
             row[0]
             for row in self.database.query_all(
@@ -65,13 +65,13 @@ class DatabaseTests(unittest.TestCase):
                 connection = database.connection
                 self.assertEqual(connection.execute("PRAGMA foreign_keys").fetchone()[0], 1)
                 self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
-                self.assertEqual(database.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 1)
+                self.assertEqual(database.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 2)
             finally:
                 database.close()
 
             reopened = Database(path, seed=False)
             try:
-                self.assertEqual(reopened.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 1)
+                self.assertEqual(reopened.query_one("SELECT COUNT(*) FROM schema_migrations")[0], 2)
                 self.assertEqual(reopened.query_one("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'songs'")[0], 1)
             finally:
                 reopened.close()

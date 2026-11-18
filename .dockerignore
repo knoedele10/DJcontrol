@@ -8,10 +8,13 @@
 Template/dist
 Backend/Data
 Backend/Tests/.audit-tmp
+Backend/tmp*
 Desktop
+Dest
 Docs
 Probes
 Scripts
 .dsh-tmp
+.vscode
 Dockerfile
 .dockerignore

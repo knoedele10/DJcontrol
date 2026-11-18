@@ -42,4 +42,15 @@ class PlayerSettings(StrictModel):
 
 class ControllerSettings(StrictModel):
     name: Literal["mock", "kugou"]
+    playlist: StrictStr | None = Field(default=None, max_length=100)
+
+
+class PlaylistAdd(StrictModel):
+    song_id: StrictInt = Field(ge=0)
+
+
+class TutorialProgress(StrictModel):
+    """已看完的教程版本；0 表示从没看完，首次打开面板时会强制显示教程。"""
+
+    completed_version: StrictInt = Field(ge=0, le=1000)
 

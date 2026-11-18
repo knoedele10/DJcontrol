@@ -89,7 +89,39 @@ def _current(pid: int) -> tuple[str, str]:
     return parse_title(info.get("window_title", "")) if info.get("pid") == pid else ("", "")
 
 
-def play_track(hwnd: int, pid: int, title: str, artist: str) -> None:
+def play_track(hwnd: int, pid: int, title: str, artist: str, *, playlist: str = '',
+               in_playlist: bool | None = None) -> dict:
+    from KugouControl.Playlist import PlaylistMiss, PlaylistUnsupported, play_from_playlist
+    missed = False
+    if playlist and in_playlist is not False:
+        try:
+            play_from_playlist(hwnd, pid, playlist, title, artist)
+            return {'via': 'playlist', 'in_playlist': True}
+        except PlaylistMiss:
+            missed = True
+        except PlaylistUnsupported:
+            pass  # 尚未点击歌曲且没有可靠入口，继续原搜索路径。
+        except TrackFailed as exc:
+            exc.via = 'playlist'
+            raise
+    try:
+        _play_search(hwnd, pid, title, artist)
+    except TrackFailed as exc:
+        exc.via = 'search'
+        exc.playlist_missed = missed
+        raise
+    return {'via': 'search', 'playlist_missed': missed}
+
+
+def _play_search(hwnd: int, pid: int, title: str, artist: str) -> None:
+    deadline = time.monotonic() + 24
+
+    def budget(seconds):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TrackFailed('酷狗搜索播放超时，命令不会自动重试')
+        return min(seconds, remaining)
+
     query = f"{title} {artist}".strip()
     if not title.strip():
         raise TrackFailed("歌曲没有歌名，无法在酷狗搜索")
@@ -109,25 +141,25 @@ def play_track(hwnd: int, pid: int, title: str, artist: str) -> None:
     time.sleep(0.2)
     Input.press(hwnd, win32con.VK_END)
     Input.press(hwnd, win32con.VK_BACK, len(text.CurrentValue or "") + 2)
-    if not _wait(lambda: not text.CurrentValue, 1.5):
+    if not _wait(lambda: not text.CurrentValue, budget(1.5)):
         raise TrackFailed("清不掉酷狗搜索框里原来的字，请手动清空后重试")
     Input.type_text(hwnd, query)
-    if not _wait(lambda: text.CurrentValue == query, 1.5):
+    if not _wait(lambda: text.CurrentValue == query, budget(1.5)):
         raise TrackFailed("搜索词没有写进酷狗搜索框，请恢复酷狗主界面后重试")
     before = _current(pid)
     Input.press(hwnd, win32con.VK_RETURN)
 
-    tab = _wait(lambda: _find(root, "Tab", "搜索", depth=2), 3)
+    tab = _wait(lambda: _find(root, "Tab", "搜索", depth=2), budget(3))
     page = _find(tab, "Custom", "内嵌页", depth=2) if tab else None
     if not page:
         raise TrackFailed("酷狗没有打开搜索结果页")
     area = page.rectangle
     if old is None:
         time.sleep(1.0)  # 结果页刚打开，先让它开始加载
-    listed = _settle(hwnd, area, scale, SEARCH_LAYOUT["results_wait"], changed_from=old)
+    listed = _settle(hwnd, area, scale, budget(SEARCH_LAYOUT["results_wait"]), changed_from=old)
     tab_x, tab_y = SEARCH_LAYOUT["songs_tab"]
     Input.click(hwnd, area.left + tab_x * scale, area.top + tab_y * scale)
-    _settle(hwnd, area, scale, SEARCH_LAYOUT["songs_wait"], changed_from=listed)
+    _settle(hwnd, area, scale, budget(SEARCH_LAYOUT["songs_wait"]), changed_from=listed)
     row_x, row_y = SEARCH_LAYOUT["first_song"]
     row = (area.left + row_x * scale, area.top + row_y * scale)
 
@@ -135,7 +167,7 @@ def play_track(hwnd: int, pid: int, title: str, artist: str) -> None:
     Input.click(hwnd, *row, double=True)
     started = time.monotonic()
     clicked_again = False
-    while time.monotonic() - started < SEARCH_LAYOUT["play_wait"]:
+    while time.monotonic() - started < SEARCH_LAYOUT["play_wait"] and time.monotonic() < deadline:
         time.sleep(0.2)
         now = _current(pid)
         if same_track(*now, title, artist):

@@ -45,6 +45,7 @@ class PlayerReading:
     position: float | None = None
     duration: float | None = None
     error: str | None = None
+    via: Literal["playlist", "search"] | None = None
 
 
 class PlayerController(ABC):
@@ -73,6 +74,19 @@ class PlayerController(ABC):
 
     def verify_command(self) -> None:
         """服务刷新后核验上一次命令，模拟控制器无需额外核验。"""
+
+    def configure_playlist(self, name: str) -> None:
+        """仅保存配置；界面探测由显式刷新触发。"""
+
+    def playlist_snapshot(self) -> dict:
+        return {"name": "", "route": None, "supported": False, "can_add": False,
+                "complete": False, "tracks": [], "note": "请切换到酷狗控制器"}
+
+    def refresh_playlist(self) -> dict:
+        raise CapabilityUnsupported("play_from_playlist")
+
+    def add_to_playlist(self, song: dict) -> dict:
+        raise CapabilityUnsupported("add_to_playlist")
 
     @abstractmethod
     def close(self) -> None: ...

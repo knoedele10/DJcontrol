@@ -3,6 +3,7 @@
 from Database.Connection import Database
 from Database.Repositories import (
     LibraryRepository,
+    PlaylistRepository,
     PptBindingRepository,
     QueueRepository,
     SessionRepository,
@@ -13,6 +14,7 @@ from Database.Repositories import (
 __all__ = [
     "Database",
     "LibraryRepository",
+    "PlaylistRepository",
     "PptBindingRepository",
     "QueueRepository",
     "SessionRepository",

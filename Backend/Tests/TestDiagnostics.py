@@ -104,6 +104,26 @@ class DiagnosticsApiTests(unittest.TestCase):
             invalid = client.put("/api/settings/controller", json={"name": "other"})
             self.assertEqual(invalid.status_code, 422)
 
+    def test_tutorial_progress_is_saved_in_backend_settings(self) -> None:
+        database = Database(":memory:")
+        ppt = PptService(factory=lambda app: FakePptController(app), poll_interval=0.02)
+        player = PlayerService(database, controller_name="mock", poll_interval=0.02)
+        with TestClient(create_app(ppt, database, player)) as client:
+            self.assertEqual(client.get("/api/settings/tutorial").json(), {"completed_version": 0})
+
+            saved = client.put("/api/settings/tutorial", json={"completed_version": 1})
+            self.assertEqual(saved.status_code, 200)
+            self.assertEqual(saved.json(), {"completed_version": 1})
+            self.assertEqual(client.get("/api/settings/tutorial").json(), {"completed_version": 1})
+            self.assertEqual(SettingsRepository(database).get("ui.tutorial_version"), 1)
+
+            for body in ({"completed_version": -1}, {"completed_version": "1"}, {"completed_version": True},
+                         {"completed_version": 1, "extra": 1}, {}):
+                self.assertEqual(client.put("/api/settings/tutorial", json=body).status_code, 422, body)
+
+            SettingsRepository(database).set("ui.tutorial_version", "坏数据")
+            self.assertEqual(client.get("/api/settings/tutorial").json(), {"completed_version": 0})
+
 
 if __name__ == "__main__":
     unittest.main()

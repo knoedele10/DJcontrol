@@ -14,6 +14,20 @@ POSITION_UNITS_PER_SECOND = 100
 SEARCH_LAYOUT = {"search_box_height": 48, "songs_tab": (200, 43), "first_song": (560, 261),
                  "rows": (100, 620), "results_wait": 6.0, "songs_wait": 3.0, "play_wait": 12.0}
 
+# 歌单使用实际 UIA 矩形，不猜测歌曲位置。B 路线的坐标必须真机测量后才可填写。
+PLAYLIST_LAYOUT = {"wait": 8.0, "filter_wait": 1.0, "search_box_height": 48, "first_song": None,
+                   "filter_names": ("歌单内搜索", "搜索歌单", "搜索本歌单", "搜索歌曲", "搜索"),
+                   "empty_names": ("暂无歌曲", "没有找到相关歌曲", "没有搜索结果", "无搜索结果"),
+                   "title_headers": ("歌曲", "歌曲名", "歌曲名称", "歌名"),
+                   "artist_headers": ("歌手", "歌手名", "歌手名称")}
+
+
+def exact_track(got_title: str, got_artist: str, title: str, artist: str) -> bool:
+    """歌单/加歌使用完整曲名，不把 Live、伴奏等版本后缀省略；歌手集合需一致。"""
+    singers = lambda value: sorted(filter(None, (_plain(s) for s in re.split(r"[、,，/&;；]", value))))
+    return bool(_plain(title) and _plain(artist) and _plain(got_title) == _plain(title)
+                and singers(got_artist) == singers(artist))
+
 
 def match(version: str | None) -> str | None:
     return PROFILE if version == VERSION else None

@@ -10,6 +10,7 @@ export interface DesktopPaths {
   frontendDist: string
   dbPath: string
   logsDir: string
+  cacheDir: string
   runnerScript: string
   loadingPage: string
   iconPath: string
@@ -50,13 +51,15 @@ export function resolveDesktopPaths(input: ResolvePathsInput): DesktopPaths {
   const backendDir = isPackaged
     ? path.join(resourcesPath, 'backend')
     : path.join(repoRoot, 'Backend')
-  const frontendDist = env.FRONTEND_DIST?.trim()
-    || (isPackaged ? path.join(resourcesPath, 'frontend') : path.join(repoRoot, 'Template', 'dist'))
-  const dbPath = env.DB_PATH?.trim()
-    || (isPackaged
-      ? path.join(userDataPath, 'Data', 'dashboard.db')
-      : path.join(backendDir, 'Data', 'dashboard.db'))
+  // 打包版锁定内置前端与 userData 数据库路径，禁止宿主机 FRONTEND_DIST / DB_PATH 覆盖或写入安装目录。
+  const frontendDist = isPackaged
+    ? path.join(resourcesPath, 'frontend')
+    : (env.FRONTEND_DIST?.trim() || path.join(repoRoot, 'Template', 'dist'))
+  const dbPath = isPackaged
+    ? path.join(userDataPath, 'Data', 'dashboard.db')
+    : (env.DB_PATH?.trim() || path.join(backendDir, 'Data', 'dashboard.db'))
   const logsDir = path.join(userDataPath, 'logs')
+  const cacheDir = path.join(userDataPath, 'cache')
   const loadingPage = path.join(desktopRoot, 'Resources', 'Loading.html')
   const iconFile = platform === 'win32' ? 'Icon.ico' : 'Icon.png'
   const iconCandidates = isPackaged
@@ -93,6 +96,7 @@ export function resolveDesktopPaths(input: ResolvePathsInput): DesktopPaths {
     frontendDist,
     dbPath,
     logsDir,
+    cacheDir,
     runnerScript,
     loadingPage,
     iconPath,
@@ -117,24 +121,21 @@ export function resolvePythonExecutable(input: {
     exists = fs.existsSync,
   } = input
 
+  if (isPackaged) {
+    // 打包版必须锁定随包分发的独立 Python，禁止宿主机环境变量或系统 Python 旁路。
+    return platform === 'win32'
+      ? path.join(resourcesPath, 'python', 'python.exe')
+      : path.join(resourcesPath, 'python', 'bin', 'python3')
+  }
+
   const override = env.KGDASH_PYTHON?.trim() || env.PYTHON_EXE?.trim()
   if (override) return override
 
-  const candidates: string[] = []
-  if (isPackaged && resourcesPath) {
-    candidates.push(
-      platform === 'win32'
-        ? path.join(resourcesPath, 'python', 'python.exe')
-        : path.join(resourcesPath, 'python', 'bin', 'python3'),
-    )
-  }
-  candidates.push(
-    platform === 'win32'
-      ? path.join(backendDir, '.venv', 'Scripts', 'python.exe')
-      : path.join(backendDir, '.venv', 'bin', 'python'),
-  )
+  const venvPython = platform === 'win32'
+    ? path.join(backendDir, '.venv', 'Scripts', 'python.exe')
+    : path.join(backendDir, '.venv', 'bin', 'python')
 
-  return candidates.find((candidate) => exists(candidate)) ?? (platform === 'win32' ? 'python' : 'python3')
+  return exists(venvPython) ? venvPython : (platform === 'win32' ? 'python' : 'python3')
 }
 
 function parsePort(raw: string | undefined): number | null {
@@ -147,12 +148,14 @@ function parsePort(raw: string | undefined): number | null {
 export function parseDesktopOptions(
   argv: string[] = process.argv.slice(1),
   env: NodeJS.ProcessEnv = process.env,
+  isPackaged = false,
 ): DesktopOptions {
-  const devMode = argv.includes('--dev') || env.KGDASH_DEV === '1' || env.ELECTRON_DEV === '1'
-  const devUrl = env.KGDASH_DEV_URL?.trim() || 'http://127.0.0.1:5173'
-  const preferredPort = parsePort(env.KGDASH_PORT) ?? (devMode ? 8000 : 18081)
+  // 打包版禁止通过宿主机开发/测试环境变量切换外部服务、端口或提前退出。
+  const devMode = !isPackaged && (argv.includes('--dev') || env.KGDASH_DEV === '1' || env.ELECTRON_DEV === '1')
+  const devUrl = (!isPackaged && env.KGDASH_DEV_URL?.trim()) || 'http://127.0.0.1:5173'
+  const preferredPort = (!isPackaged ? parsePort(env.KGDASH_PORT) : null) ?? (devMode ? 8000 : 18081)
   const openDevTools = argv.includes('--devtools') || devMode
-  const smokeTest = argv.includes('--smoke-test') || env.KGDASH_SMOKE_TEST === '1'
+  const smokeTest = argv.includes('--smoke-test') || (!isPackaged && env.KGDASH_SMOKE_TEST === '1')
   return { devMode, devUrl, preferredPort, openDevTools, smokeTest }
 }
 
