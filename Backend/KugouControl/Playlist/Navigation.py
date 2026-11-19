@@ -22,11 +22,12 @@ def _nav(root):
 
 
 def _ensure_nav(hwnd, deadline):
-    nav = _nav(_root(hwnd))
+    root = _root(hwnd)
+    nav = _nav(root)
     if nav is not None:
         return nav
     # 搜索结果页等页面没有左侧导航；面板搜歌播放后酷狗就停在搜索页，先回到顶部「音乐」页。
-    tab = _unique((e for e in _find(_root(hwnd), "TabItem", PLAYLIST_LAYOUT["music_tab"], 4) if _visible(e)),
+    tab = _unique((e for e in _find(root, "TabItem", PLAYLIST_LAYOUT["music_tab"], 4) if _visible(e)),
                   "找不到酷狗顶部的「音乐」页签，请恢复酷狗主界面后重新检测")
     _click(hwnd, tab)
     while time.monotonic() < deadline:
@@ -48,21 +49,30 @@ def _reveal_entry(scroller, nav, index, name, deadline, *, bottom=None):
     """把侧栏第 index 项滚到完整可见；半露在播放栏下面的项点中心会点到播放栏。"""
     for _ in range(30):
         view = nav.rectangle
-        items = {i: element for i, _, element in _nav_items(nav)}
-        item = items.get(index)
+        items = {i: (label, element) for i, label, element in _nav_items(nav)}
+        label, item = items.get(index, (None, None))
         if item is not None:
-            if (item.name or '').strip() != name:
+            if label != name:
                 raise PlaylistUnsupported('酷狗歌单列表在定位期间发生变化，请重新检测')
             if _clickable(item, view, bottom=bottom):
                 return item
         if time.monotonic() >= deadline:
             break
         if item is not None:
-            moved = scroller.nudge(1 if item.rectangle.bottom > _clear_span(item, view, bottom=bottom)[1] else -1)
-        elif items and index > max(items):
-            moved = scroller.down()
+            moved = scroller.nudge(1 if item.rectangle.bottom > _clear_span(item, view, bottom=bottom)[1] else -1,
+                                    deadline)
+        elif items and scroller.per_notch:
+            # 名称唯一性已经证明。按当前槽位估算回跳距离，随后仍回读名称和可点击范围。
+            middle = min(items, key=lambda i: abs((items[i][1].rectangle.top + items[i][1].rectangle.bottom) / 2
+                                                   - (view.top + view.bottom) / 2))
+            rect = items[middle][1].rectangle
+            pixels = (index - middle) * (rect.bottom - rect.top)
+            notches = int(pixels / scroller.per_notch) or (1 if pixels > 0 else -1)
+            moved = scroller.nudge(max(-40, min(40, notches)), deadline)
+        elif items:
+            moved = scroller.down(-1 if index < min(items) else 1, deadline=deadline)
         else:
-            moved = scroller.nudge(-PLAYLIST_LAYOUT["scan_notches"])
+            break
         if not moved:
             break
     raise PlaylistUnsupported("歌单在酷狗侧栏里无法完整显示，请把酷狗窗口拉高后重新检测")
@@ -77,13 +87,18 @@ def _find_entry(hwnd, nav, wanted, deadline, *, exact_only=False, bottom=None, u
     """
     fixed = PLAYLIST_LAYOUT["nav_fixed"]
     names = {}
-    count = len(nav.children())
+    first = nav.children()
+    count = len(first)
+    live = {}
 
-    def look():
-        children = nav.children()
+    def look(children=None):
+        nonlocal live
+        if children is None:
+            children = nav.children()
         if len(children) != count:
             raise PlaylistUnsupported('酷狗歌单列表在定位期间发生变化，请重新检测')
-        for index, name, _ in _nav_items(nav, children):
+        live = {index: name for index, name, _ in _nav_items(nav, children)}
+        for index, name in live.items():
             if index in names and names[index] != name:
                 raise PlaylistUnsupported('酷狗歌单列表在定位期间发生变化，请重新检测')
             names[index] = name
@@ -106,13 +121,15 @@ def _find_entry(hwnd, nav, wanted, deadline, *, exact_only=False, bottom=None, u
         return not unique and bool(playlist_hits())
 
     scroller = _WheelScroll(hwnd, nav)
-    # 从当前位置读到尾，再从顶部补读。短期滚不动不能证明到尾；歌单段每个槽位都看到名字才能判断唯一。
-    for rewind in (False, True):
-        if rewind:
-            scroller.top(deadline)
-        look()
-        while not covered() and time.monotonic() < deadline and not found():
-            if not scroller.down():
+    own_header = PLAYLIST_LAYOUT["own_header"]
+    look(first)
+    # 先看当前位置。看不到自建歌单标题才回绕；看到标题即可停，无需继续试探固定入口所在的顶部。
+    for rewind in (header() is None, True):
+        if rewind and not covered() and not found():
+            while own_header not in live.values() and scroller.nudge(-40, deadline):
+                look()
+        while not covered() and not found():
+            if not scroller.down(fraction=0.95, deadline=deadline):
                 break
             look()
         if covered() or time.monotonic() >= deadline or found():
