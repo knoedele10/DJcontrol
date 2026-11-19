@@ -140,7 +140,8 @@ export interface Diagnostics {
 }
 
 export interface PlaylistState {
-  name: string
+  name: string // 酷狗里的完整歌单名；检测把部分名称解析成完整名后会写回设置
+  requested?: string // 本次检测时设置里填的名字
   route: 'A' | 'B' | null
   supported: boolean
   can_add: boolean

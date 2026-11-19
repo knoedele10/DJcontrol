@@ -24,6 +24,23 @@ def click(hwnd: int, x: float, y: float, *, double: bool = False) -> None:
         win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, point)
 
 
+def wheel(hwnd: int, x: float, y: float, notches: int) -> None:
+    """在屏幕坐标 (x, y) 处投递鼠标滚轮，notches > 0 向下滚。
+
+    酷狗的侧栏和歌单列表没有 ScrollPattern，只认滚轮。先投递一次鼠标移动，让酷狗把滚轮交给这个位置下的列表；
+    滚轮消息的坐标按约定是屏幕坐标。
+    """
+
+    client_x, client_y = win32gui.ScreenToClient(hwnd, (int(x), int(y)))
+    move = win32api.MAKELONG(client_x, client_y)
+    delta = (-120 if notches > 0 else 120) & 0xFFFF
+    screen = win32api.MAKELONG(int(x) & 0xFFFF, int(y) & 0xFFFF)
+    for _ in range(abs(notches)):
+        # 酷狗把滚轮交给鼠标最后停留的位置；用户的真实鼠标在酷狗上移动会改掉它，所以每格前都重新投递一次位置。
+        win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, move)
+        win32gui.PostMessage(hwnd, win32con.WM_MOUSEWHEEL, win32api.MAKELONG(0, delta), screen)
+
+
 def press(hwnd: int, key: int, times: int = 1) -> None:
     for _ in range(times):
         win32gui.PostMessage(hwnd, win32con.WM_KEYDOWN, key, 0)

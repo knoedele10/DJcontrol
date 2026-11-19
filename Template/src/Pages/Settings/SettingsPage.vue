@@ -73,7 +73,7 @@ onMounted(() => refresh())
           <button :disabled="loading || playback.busy" @click="savePlaylist">保存并检测</button>
           <button :disabled="loading || playback.busy || !diagnostics?.playlist.name || diagnostics?.controller !== 'kugou'" @click="inspectPlaylist">刷新歌单</button>
         </div>
-        <p>请先在酷狗创建同名歌单并保持主窗口打开。逐首加歌会试听切歌，完成后暂停，请在演出前使用。</p>
+        <p>请先在酷狗创建歌单并保持主窗口打开（不要最小化）。可以只填歌单名的一部分：检测时会在酷狗侧栏里找唯一匹配的歌单，并换成完整名称。逐首加歌会试听切歌，完成后暂停，请在演出前使用。</p>
         <p v-if="playlistMessage" role="status">{{ playlistMessage }}</p>
         <p v-if="diagnostics?.playlist">{{ diagnostics.playlist.note }}</p>
         <p v-if="diagnostics?.playlist.add_note">加歌：{{ diagnostics.playlist.add_note }}</p>
