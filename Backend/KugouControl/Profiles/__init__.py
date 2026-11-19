@@ -1,6 +1,7 @@
 """只匹配真机验证过的精确版本，更新后默认关闭操作能力。"""
 
 import re
+import unicodedata
 
 VERSION = "10.2.52.25713"
 PROFILE = "kugou-10.2.52.25713"
@@ -15,18 +16,40 @@ SEARCH_LAYOUT = {"search_box_height": 48, "songs_tab": (200, 43), "first_song": 
                  "rows": (100, 620), "results_wait": 6.0, "songs_wait": 3.0, "play_wait": 12.0}
 
 # 歌单使用实际 UIA 矩形，不猜测歌曲位置。B 路线的坐标必须真机测量后才可填写。
-PLAYLIST_LAYOUT = {"wait": 8.0, "filter_wait": 1.0, "search_box_height": 48, "first_song": None,
+# 酷狗 10.2.52 真机结构（2026-11-18）：左侧导航 List「导航」只在顶部「音乐」页出现，项名是完整歌单名；
+# 歌单页的歌曲在 List「单曲」里。两个列表都没有 ScrollPattern，只能投递滚轮；滚出视口的项名字为空。
+# edge_margin：列表下沿被播放栏进度条压住的高度；点击只落在避开这一条的部分。
+# wait：播放时定位歌单的上限；inspect_wait：检测（部分名称要把侧栏读完一遍）；play_wait：双击后核验播放；
+# add_wait：加歌对话框；load_wait：歌单页刚打开时等歌曲出现。
+PLAYLIST_LAYOUT = {"wait": 14.0, "inspect_wait": 24.0, "play_wait": 10.0, "add_wait": 14.0, "load_wait": 4.0,
+                   "filter_wait": 1.0, "search_box_height": 48, "first_song": None,
+                   "music_tab": "音乐", "nav_list": "导航", "own_header": "自建歌单", "song_lists": ("单曲",),
+                   "nav_fixed": ("我的收藏", "我的频道", "本地与下载", "音乐云盘", "已购音乐", "最近播放", "默认列表",
+                                 "自建歌单", "收藏歌单"),
+                   "edge_margin": 12, "scan_notches": 3, "row_blank_right": 0.025, "wheel_start": 0.6,
                    "filter_names": ("歌单内搜索", "搜索歌单", "搜索本歌单", "搜索歌曲", "搜索"),
                    "empty_names": ("暂无歌曲", "没有找到相关歌曲", "没有搜索结果", "无搜索结果"),
+                   "empty_playlist_names": ("暂无歌曲", "这里没内容显示~"),
                    "title_headers": ("歌曲", "歌曲名", "歌曲名称", "歌名"),
                    "artist_headers": ("歌手", "歌手名", "歌手名称")}
+PLAYLIST_ADD_SOFT_TIMEOUT = 43
+PLAYLIST_ADD_TIMEOUT = 48
 
 
 def exact_track(got_title: str, got_artist: str, title: str, artist: str) -> bool:
     """歌单/加歌使用完整曲名，不把 Live、伴奏等版本后缀省略；歌手集合需一致。"""
-    singers = lambda value: sorted(filter(None, (_plain(s) for s in re.split(r"[、,，/&;；]", value))))
-    return bool(_plain(title) and _plain(artist) and _plain(got_title) == _plain(title)
-                and singers(got_artist) == singers(artist))
+    wanted_title = _exact_text(title)
+    wanted_singers = _exact_singers(artist)
+    return bool(wanted_title and wanted_singers and wanted_title == _exact_text(got_title)
+                and wanted_singers == _exact_singers(got_artist))
+
+
+def _exact_text(value: str) -> str:
+    return "".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+def _exact_singers(value: str) -> set[str]:
+    return set(filter(None, re.split(r"[、,/&;]", _exact_text(value))))
 
 
 def match(version: str | None) -> str | None:
@@ -43,7 +66,8 @@ def parse_title(title: str) -> tuple[str, str]:
 
 
 def _plain(text: str) -> str:
-    return "".join(ch for ch in text.casefold() if ch.isalnum())
+    # NFKC 把全角字母数字（如酷狗里的「ＴＲＡ＄Ｈ」）折成半角，再忽略大小写和标点空格。
+    return "".join(ch for ch in unicodedata.normalize("NFKC", text).casefold() if ch.isalnum())
 
 
 def same_track(got_title: str, got_artist: str, title: str, artist: str) -> bool:

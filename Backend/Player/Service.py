@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any, Callable, Literal
 
 from Player.Base import CapabilityUnsupported, ControllerCommandFailed, ControllerCommandPending, ControllerTimeout, ControllerTrackLoading, PlayerController, PlayerReading, PlayerUnavailable
@@ -99,6 +101,7 @@ class PlayerService:
         # 第三项是这首歌在已播里的位置：新点的歌还没记进已播，记 -1。
         self._loading: tuple[int, Callable[[], None], int] | None = None
         self._playlist_cache = None
+        self._playlist_config = None
 
     @staticmethod
     def _factory_for(name: str) -> Callable[[], PlayerController]:
@@ -113,7 +116,14 @@ class PlayerService:
     def _controller_for_thread(self) -> PlayerController:
         if self._controller is None:
             self._controller = self._factory()
-            self._controller.configure_playlist(SettingsRepository(self.database).get(PLAYLIST_KEY, ''))
+            self._playlist_config = None
+        config = self._playlist_settings_version()
+        if config != self._playlist_config:
+            if self._playlist_config is not None:
+                self._controller.configure_playlist('')
+            self._controller.configure_playlist(config[0])
+            self._playlist_config = config
+            self._playlist_cache = None
         return self._controller
 
     def _ensure_session(self) -> dict[str, Any]:
@@ -133,8 +143,9 @@ class PlayerService:
 
     def _read_state(self) -> PlayerState:
         controller = self._controller_for_thread()
+        config = self._playlist_config
         reading: PlayerReading = controller.get_state()
-        self._remember_playlist_snapshot(controller)
+        self._accept_playlist_snapshot(controller.playlist_snapshot(), config)
         capabilities = controller.capabilities()
         if self._loading:
             song_id, commit, _ = self._loading
@@ -217,14 +228,17 @@ class PlayerService:
         song = songs.get(song_id)
         if song is None:
             raise PlayerNotFound("歌曲不存在")
-        playlist = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
+        controller = self._controller_for_thread()
+        config = self._playlist_config
+        playlist = config[0]
         song = {**song, 'in_playlist': PlaylistRepository(self.database).list(playlist).get(song_id)}
         result = {}
 
         def commit() -> None:
-            if playlist and result.get('via') == 'playlist':
+            current_playlist = playlist and config == self._playlist_settings_version()
+            if current_playlist and result.get('via') == 'playlist':
                 PlaylistRepository(self.database).set(playlist, song, True)
-            elif playlist and result.get('playlist_missed'):
+            elif current_playlist and result.get('playlist_missed'):
                 PlaylistRepository(self.database).set(playlist, song, False)
             self._armed_song = song_id
             QueueRepository(self.database).remove_song(song_id)
@@ -237,12 +251,12 @@ class PlayerService:
 
         self._loading = None
         try:
-            self._controller_for_thread().play_track(song)
+            controller.play_track(song)
         except ControllerTrackLoading:
             self._loading = (song_id, commit, -1 if back_steps is None else back_steps)
             raise
         finally:
-            result.update(getattr(self._controller_for_thread(), 'play_result', {}))
+            result.update(getattr(controller, 'play_result', {}))
         commit()
 
     def _play_previous(self) -> None:
@@ -387,6 +401,8 @@ class PlayerService:
     async def switch_controller(self, name: Literal["mock", "kugou"], playlist: str | None = None) -> dict:
         if name not in ("mock", "kugou"):
             raise ValueError("播放器必须为 mock 或 kugou")
+        if self._lock.locked():
+            raise PlayerConflict('播放器正在执行其他操作，请稍后再保存播放器设置')
         async with self._lock:
             def switch() -> PlayerState:
                 self._close_controller()
@@ -406,32 +422,56 @@ class PlayerService:
             return self.snapshot()
 
     def _playlist_view(self) -> dict:
-        name = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
         status = self._controller_for_thread().playlist_snapshot()
+        name = self._playlist_config[0]
         return {**{key: value for key, value in status.items() if key != 'tracks'}, 'name': name,
                 'songs': PlaylistRepository(self.database).list(name)}
 
-    def _remember_playlist_snapshot(self, controller: PlayerController) -> None:
-        state = controller.playlist_snapshot()
-        tracks = state.get('tracks', [])
-        token = (id(controller), state.get('name'), state.get('route'), state.get('complete'),
-                 tuple((t['title'], t['artist']) for t in tracks))
-        if token == self._playlist_cache or not state.get('supported'):
-            return
-        self._playlist_cache = token
-        self._record_playlist_members(state)
+    def _playlist_settings_version(self) -> tuple[str, str | None]:
+        row = self.database.query_one('SELECT value, updated_at FROM settings WHERE key = ?', (PLAYLIST_KEY,))
+        if row is None:
+            return '', None
+        try:
+            name = json.loads(row['value'])
+        except ValueError:
+            name = row['value']
+        return name if isinstance(name, str) else '', row['updated_at']
 
-    def _record_playlist_members(self, state: dict) -> None:
+    def _accept_playlist_snapshot(self, state: dict, config: tuple[str, str | None], *, refresh=False) -> None:
         from KugouControl.Profiles import exact_track
-        name = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
-        if not name:
+        configured, version = config
+        resolved = (state.get('name') or '').strip()
+        requested = (state.get('requested') or resolved).strip()
+        if not state.get('supported') or not configured or not resolved:
             return
-        repository = PlaylistRepository(self.database)
+        if configured != requested and (refresh or configured != resolved):
+            return
+        tracks = state.get('tracks', [])
+        token = (resolved, state.get('route'), state.get('complete'),
+                 tuple((t['title'], t['artist']) for t in tracks))
+        if not refresh and token == self._playlist_cache:
+            return
+        checked_at = datetime.now().astimezone().isoformat()
+        members = []
         for song in SongRepository(self.database).list():
-            present = any(exact_track(t['title'], t['artist'], song['title'], song['artist'])
-                          for t in state.get('tracks', []))
+            present = any(exact_track(t['title'], t['artist'], song['title'], song['artist']) for t in tracks)
             if present or state.get('complete'):
-                repository.set(name, song, present)
+                members.append((resolved, present, checked_at, song['id'], song['title'], song['artist']))
+        with self.database.transaction() as connection:
+            if self._playlist_settings_version() != config:
+                return
+            if configured != resolved:
+                connection.execute('UPDATE settings SET value = ?, updated_at = ? WHERE key = ?',
+                                   (json.dumps(resolved, ensure_ascii=False), checked_at, PLAYLIST_KEY))
+            if refresh or configured != resolved:
+                connection.execute('DELETE FROM playlist_tracks WHERE playlist IN (?, ?)', (configured, resolved))
+            connection.executemany(
+                'INSERT INTO playlist_tracks (playlist, song_id, title, artist, in_playlist, checked_at) '
+                'SELECT ?, id, title, artist, ?, ? FROM songs WHERE id = ? AND title = ? AND artist = ? '
+                'ON CONFLICT(playlist, song_id) DO UPDATE SET title = excluded.title, artist = excluded.artist, '
+                'in_playlist = excluded.in_playlist, checked_at = excluded.checked_at', members)
+        self._playlist_config = (resolved, checked_at if configured != resolved else version)
+        self._playlist_cache = token
 
     async def playlist(self) -> dict:
         async with self._lock:
@@ -455,13 +495,14 @@ class PlayerService:
                 logger.exception('歌单操作后的状态读取失败')
 
     async def refresh_playlist(self) -> dict:
+        if self._lock.locked():
+            raise PlayerConflict('播放器正在执行其他操作，请稍后再刷新歌单')
         async with self._lock:
             def refresh():
-                name = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
-                repository = PlaylistRepository(self.database)
-                repository.clear(name)
-                state = self._controller_for_thread().refresh_playlist()
-                self._record_playlist_members(state)
+                controller = self._controller_for_thread()
+                config = self._playlist_config
+                state = controller.refresh_playlist()
+                self._accept_playlist_snapshot(state, config, refresh=True)
                 return self._playlist_view()
             return await self._playlist_call(refresh)
 
@@ -475,15 +516,17 @@ class PlayerService:
                 if song is None:
                     raise PlayerNotFound('歌曲不存在')
                 controller = self._controller_for_thread()
+                config = self._playlist_config
                 status = controller.playlist_snapshot()
-                name = SettingsRepository(self.database).get(PLAYLIST_KEY, '')
+                name = config[0]
                 if not name or not status.get('can_add'):
                     raise PlayerUnsupported(status.get('add_note', '请配置歌单并完成加歌能力检测'))
                 self._loading = None
                 self._armed_song = None
                 PlaylistRepository(self.database).set(name, song, None)
                 result = controller.add_to_playlist(song)
-                PlaylistRepository(self.database).set(name, song, result.get('in_playlist'))
+                if config == self._playlist_settings_version():
+                    PlaylistRepository(self.database).set(name, song, result.get('in_playlist'))
                 return {**result, 'playlist': self._playlist_view()}
             return await self._playlist_call(add)
 

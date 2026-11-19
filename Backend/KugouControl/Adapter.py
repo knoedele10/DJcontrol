@@ -11,7 +11,7 @@ from typing import Callable
 
 from Player.Base import CapabilityUnsupported, ControllerCommandFailed, ControllerCommandPending, ControllerTimeout, ControllerTrackLoading, PlayerController, PlayerReading, PlayerUnavailable
 from KugouControl.Process import WorkerProcess
-from KugouControl.Profiles import exact_track, same_track
+from KugouControl.Profiles import PLAYLIST_ADD_TIMEOUT, exact_track, same_track
 
 logger = logging.getLogger(__name__)
 PLAY_TRACK_TIMEOUT = 24
@@ -28,6 +28,7 @@ class KugouController(PlayerController):
         self._track: dict | None = None  # 面板最近一次指定播放的曲库歌曲，用来把酷狗标题对回曲库
         self._playlist = self._empty_playlist('')
         self._playlist_checked = False
+        self._uncertain_adds: set[tuple[str, str, str]] = set()
         self.last_result: dict = {}
         self.play_result: dict = {}
         self._via: str | None = None
@@ -47,29 +48,44 @@ class KugouController(PlayerController):
         return dict(self._playlist)
 
     def refresh_playlist(self) -> dict:
-        name = self._playlist['name']
+        previous = self._playlist
+        name = previous['name']
         self._playlist_checked = True
-        self._playlist = self._empty_playlist(name)
         if name:
-            try:
-                self._exchange('playlist_refresh ' + json.dumps({'playlist': name}, ensure_ascii=False))
-                state = self.last_result.get('playlist')
-                if not isinstance(state, dict):
-                    raise PlayerUnavailable('歌单探测没有返回有效结果')
-                self._playlist = state
-            except Exception as exc:
-                self._playlist['note'] = str(exc)
-                raise
+            self._exchange('playlist_refresh ' + json.dumps({'playlist': name}, ensure_ascii=False))
+            state = self.last_result.get('playlist')
+            if (not isinstance(state, dict) or (state.get('requested') or state.get('name')) != name
+                    or (state.get('supported') and not state.get('name'))):
+                raise PlayerUnavailable('歌单探测没有返回与本次配置匹配的结果')
+            if self._playlist is previous:
+                if state.get('supported'):
+                    self._playlist = state
+                    if state.get('complete'):
+                        self._uncertain_adds = {key for key in self._uncertain_adds if key[0] != state['name']}
+                else:
+                    self._playlist = {**self._empty_playlist(name), 'note': state.get('note', ''),
+                                      'add_note': state.get('add_note', '')}
         return self.playlist_snapshot()
 
     def add_to_playlist(self, song: dict) -> dict:
         if not self._playlist['can_add']:
             raise CapabilityUnsupported(self._playlist.get('add_note', 'add_to_playlist'))
+        name, title, artist = self._playlist['name'], song['title'], song['artist']
+        if any(prior == name and exact_track(prior_title, prior_artist, title, artist)
+               for prior, prior_title, prior_artist in self._uncertain_adds):
+            raise CapabilityUnsupported('上次加入结果尚未核验，请先完整刷新歌单再试')
         self._pending = self._track = None
         self._via = None
-        self._exchange('playlist_add ' + json.dumps({'playlist': self._playlist['name'],
-                       'title': song['title'], 'artist': song['artist']}, ensure_ascii=False))
-        result = self.last_result.get('result', {'status': 'unverified', 'message': '加歌结果未核验', 'in_playlist': None})
+        try:
+            self._exchange('playlist_add ' + json.dumps({'playlist': name, 'title': title, 'artist': artist},
+                                                      ensure_ascii=False))
+        except (ControllerTimeout, PlayerUnavailable):
+            self._uncertain_adds.add((name, title, artist))
+            raise
+        result = dict(self.last_result.get('result', {'status': 'unverified', 'message': '加歌结果未核验',
+                                                     'in_playlist': None, 'retry_requires_refresh': True}))
+        if result.pop('retry_requires_refresh', False):
+            self._uncertain_adds.add((name, title, artist))
         if result.get('status') == 'added':
             self._playlist['add_verified'] = True
         return result
@@ -78,7 +94,7 @@ class KugouController(PlayerController):
         # 搜歌要等结果页和歌曲加载，没缓存的歌最长等十几秒；其余操作一两秒内完成。
         playlist_play = action.startswith('play_track ') and bool(json.loads(action.partition(' ')[2]).get('playlist'))
         timeout = {"read": self.timeout, "play_track": 44 if playlist_play else max(self.timeout * 2, PLAY_TRACK_TIMEOUT),
-                   'playlist_refresh': 20, 'playlist_add': 48}.get(
+                   'playlist_refresh': 40, 'playlist_add': PLAYLIST_ADD_TIMEOUT}.get(
             action.partition(" ")[0], self.timeout * 2)
         try:
             child = self._runner(
