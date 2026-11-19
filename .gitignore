@@ -26,3 +26,6 @@ Backend/Data/
 Backend/Tests/.audit-tmp/
 Backend/tmp*/
 Probes/Results/
+
+# 多人协作：各成员的 git 工作树
+.worktrees/
