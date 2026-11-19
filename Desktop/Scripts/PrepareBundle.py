@@ -283,12 +283,15 @@ def stage_python(
 
     # 构建标记放在 .bundle 根目录而非 python/ 内，避免把构建机绝对路径打进安装包。
     stamp_file = python_dest.parent / ".bundle-stamp.json"
+    constraints_txt = requirements_txt.with_name("Constraints.txt")
     sitecustomize_sha256 = _text_sha256(SITECUSTOMIZE_CODE)
     expected_identity = {
         "arch": "amd64",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "base_prefix_sha256": _text_sha256(str(base_prefix)),
         "requirements_sha256": _sha256(requirements_txt),
+        # Requirements.txt 用 -c 引用 Constraints.txt：锁定的版本变了也要重建运行环境。
+        "constraints_sha256": _sha256(constraints_txt) if constraints_txt.is_file() else None,
         "sitecustomize_sha256": sitecustomize_sha256,
     }
 
