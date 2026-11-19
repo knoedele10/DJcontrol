@@ -52,9 +52,10 @@
 
 ```powershell
 git fetch origin
-git worktree add .worktrees/<名字> -b <分支> origin/master
+git worktree add --no-track .worktrees/<名字> -b <分支> origin/master
 ```
 
+- `--no-track` 让新分支只从 `origin/master` 起点建出、不跟踪它，避免误把远程 master 设为上游。
 - 每个成员只在自己的 `.worktrees/<名字>` 里改代码，不要碰别人的工作树。
 - `.worktrees/` 已在 `.gitignore` 里，不会被提交。
 - 分支合并后清理：`git worktree remove .worktrees/<名字>`。
@@ -72,8 +73,7 @@ git worktree add .worktrees/<名字> -b <分支> origin/master
 ```powershell
 # 后端：Python 3.13（运行数据与日志在 Backend/Data/，不入库）
 cd Backend
-python -m pip install -r RequirementsDev.txt -c ../.github/ci-backend-constraints.txt
-# 约束文件钉住与本机、CI 一致的已验证版本组合，避免新机器装到未验证的最新版
+python -m pip install -r RequirementsDev.txt    # 版本锁定在 Backend/Constraints.txt，随 Requirements.txt 自动生效
 python -m unittest discover -s Tests -t . -p "Test*.py"
 ```
 
@@ -94,6 +94,8 @@ pnpm test
 ```
 
 > 统一用 `python -m pip` 而不是裸 `pip`：本机装了多个 Python 时，裸 `pip` 可能装进另一个解释器的环境。
+>
+> 后端依赖的确切版本锁定在 `Backend/Constraints.txt`（`Requirements.txt` 以 `-c` 引用，CI、Docker、桌面打包同样生效）；升级依赖要先跑通后端测试，再整体更新该文件。
 
 ## 真机验证
 
