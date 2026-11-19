@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, watch } from 'vue'
+import { routeLocationKey } from 'vue-router'
 import { usePptStore } from '@/Ppt/PptStore'
 import { useLibraryStore } from '@/Library/LibraryStore'
 import { usePlaybackStore } from '@/Playback/PlaybackStore'
@@ -13,19 +14,58 @@ const library = useLibraryStore()
 const playback = usePlaybackStore()
 const connection = useConnectionStore()
 const tutorial = useTutorialStore()
-onMounted(() => { void tutorial.init() })
-onMounted(connection.start)
-onMounted(ppt.startSync)
-onMounted(library.startSync)
-onMounted(playback.startSync)
-onBeforeUnmount(() => { connection.stop(); ppt.stopSync(); library.stopSync(); playback.stopSync() })
+
+const route = inject(routeLocationKey, null)
+const isMonitorWindow = computed(
+  () =>
+    route?.name === 'monitor' ||
+    route?.path === '/monitor' ||
+    /^#\/monitor(?:$|[/?])/.test(globalThis.window?.location?.hash ?? ''),
+)
+
+let syncing = false
+
+function startMainSync(): void {
+  if (syncing) return
+  syncing = true
+  void tutorial.init()
+  connection.start()
+  ppt.startSync()
+  library.startSync()
+  playback.startSync()
+}
+
+function stopMainSync(): void {
+  if (!syncing) return
+  syncing = false
+  connection.stop()
+  ppt.stopSync()
+  library.stopSync()
+  playback.stopSync()
+}
+
+onMounted(() => {
+  if (!isMonitorWindow.value) {
+    startMainSync()
+  }
+})
+
+watch(isMonitorWindow, (monitorOnly) => {
+  if (monitorOnly) {
+    stopMainSync()
+  } else {
+    startMainSync()
+  }
+})
+
+onBeforeUnmount(stopMainSync)
 </script>
 
 <template>
   <div class="application-shell">
-    <ConnectionBanner />
+    <ConnectionBanner v-if="!isMonitorWindow" />
     <RouterView />
-    <TutorialOverlay />
+    <TutorialOverlay v-if="!isMonitorWindow" />
   </div>
 </template>
 

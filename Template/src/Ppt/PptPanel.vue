@@ -1,15 +1,22 @@
 <script setup lang="ts">
 // PPT 放映控制：预览、翻页、黑屏、放映开关、缩略图跳页、页面绑定歌曲与翻页联动。
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useLibraryStore } from '@/Library/LibraryStore'
+import { useMonitorStore } from '@/Monitor/MonitorStore'
+import ScreenMonitor from '@/Monitor/ScreenMonitor.vue'
 import { usePlaybackStore } from '@/Playback/PlaybackStore'
 import { usePptStore } from '@/Ppt/PptStore'
 import type { PptApp } from '@/Common/Types'
 import SlidePreview from '@/Ppt/SlidePreview.vue'
 
 const library = useLibraryStore()
+const monitor = useMonitorStore()
 const playback = usePlaybackStore()
 const ppt = usePptStore()
+
+onMounted(() => {
+  void monitor.init()
+})
 
 const thumbs = ref<HTMLElement>()
 const songTitle = (id: number | null) => (id === null ? '' : library.songById(id)?.title ?? '')
@@ -23,9 +30,40 @@ watch(() => ppt.index, async () => {
 
 <template>
   <section class="col" aria-label="PPT 放映" data-tour="ppt">
-    <div class="col-h">
+    <div class="col-h ppt-head">
       <h2>PPT 放映</h2>
       <span class="pchip" :class="ppt.synced && ppt.running ? 'live' : 'idle'">{{ !ppt.synced ? '未同步' : !ppt.connected ? '未连接' : ppt.running ? (ppt.black ? '● 放映中 · 黑屏' : '● 放映中') : '未放映' }}</span>
+      <div v-if="monitor.supported" class="monitor-actions">
+        <div class="monitor-switch" role="group" aria-label="画面模式">
+          <button
+            type="button"
+            :class="{ on: monitor.mode === 'preview' }"
+            title="显示后端静态幻灯片预览"
+            @click="monitor.setMode('preview')"
+          >
+            预览
+          </button>
+          <button
+            type="button"
+            :class="{ on: monitor.mode === 'live' }"
+            :disabled="!monitor.hasSecondScreen"
+            :title="monitor.unavailableReason ?? '实时监看第二块屏幕画面（约 30 帧）'"
+            @click="monitor.setMode('live')"
+          >
+            第二屏
+          </button>
+        </div>
+        <button
+          type="button"
+          class="popup-btn"
+          :class="{ on: monitor.windowOpen }"
+          :disabled="!monitor.hasSecondScreen"
+          :title="monitor.unavailableReason ?? (monitor.windowOpen ? '收回置顶监看小窗' : '弹出置顶实时监看小窗')"
+          @click="monitor.windowOpen ? monitor.closePopup() : monitor.openPopup()"
+        >
+          {{ monitor.windowOpen ? '收回小窗' : '⧉ 小窗' }}
+        </button>
+      </div>
       <button class="pbig" title="放大 / 还原 PPT 区域（P）" @click="ppt.big = !ppt.big">{{ ppt.big ? '⤡ 还原' : '⤢ 放大' }}</button>
     </div>
     <div class="body">
@@ -38,6 +76,13 @@ watch(() => ppt.index, async () => {
         <button :disabled="ppt.pending || !ppt.synced" @click="ppt.connectTo()">重新连接</button>
       </div>
       <div v-if="ppt.error" class="ppt-error" role="status">{{ ppt.error }}</div>
+      <div
+        v-if="monitor.supported && monitor.displaysLoaded && !monitor.hasSecondScreen && monitor.unavailableReason"
+        class="monitor-hint"
+        role="status"
+      >
+        {{ monitor.unavailableReason }}
+      </div>
       <div v-if="ppt.preloadTotal" class="preload-progress" role="status">
         <template v-if="ppt.preloadLoading">正在后台预载：{{ ppt.preloadReady }} / {{ ppt.preloadTotal }} 页</template>
         <template v-else-if="ppt.preloadFailed">已预载 {{ ppt.preloadReady }} 页，{{ ppt.preloadFailed }} 页失败，可刷新预览重试</template>
@@ -45,8 +90,24 @@ watch(() => ppt.index, async () => {
         <progress v-if="ppt.preloadLoading" :value="ppt.preloadReady + ppt.preloadFailed" :max="ppt.preloadTotal" aria-label="幻灯片预载进度"></progress>
       </div>
 
-      <div class="slide" :class="{ black: ppt.black }" :style="{ '--sbg': ppt.current.bg }">
-        <template v-if="!ppt.black">
+      <div
+        class="slide"
+        :class="{
+          black: ppt.black && (!monitor.supported || monitor.mode === 'preview'),
+          'live-monitor': monitor.supported && monitor.mode === 'live',
+        }"
+        :style="{ '--sbg': ppt.current.bg }"
+      >
+        <div v-if="monitor.supported && monitor.mode === 'live' && monitor.windowOpen" class="popup-active" role="status">
+          <span>画面已在置顶小窗中</span>
+          <span aria-hidden="true">·</span>
+          <button type="button" class="popup-retract" @click="monitor.closePopup()">收回</button>
+        </div>
+        <ScreenMonitor
+          v-else-if="monitor.supported && monitor.mode === 'live'"
+          :active="monitor.mode === 'live' && !monitor.windowOpen"
+        />
+        <template v-else-if="!ppt.black">
           <SlidePreview v-if="ppt.previewUrl" :key="ppt.previewUrl" :src="ppt.previewUrl" :alt="`${ppt.file} 第 ${ppt.index + 1} 页`" />
           <div v-else class="st">{{ ppt.current.title }}</div>
           <div v-if="ppt.current.songId !== null" class="song">♪ {{ songTitle(ppt.current.songId) }}</div>
@@ -94,6 +155,16 @@ watch(() => ppt.index, async () => {
 </template>
 
 <style scoped>
+.ppt-head { flex-wrap: wrap; gap: 8px; }
+.ppt-head h2 { min-width: 72px; }
+.monitor-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.monitor-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.monitor-switch button { font-size: 12px; padding: 4px 9px; border: none; border-radius: 0; background: transparent; color: var(--fg2); }
+.monitor-switch button + button { border-left: 1px solid var(--line); }
+.monitor-switch button.on { background: var(--accent); color: var(--accent-ink, #06101a); font-weight: 700; }
+.popup-btn { font-size: 12px; padding: 4px 10px; white-space: nowrap; }
+.popup-btn.on { border-color: var(--accent); color: var(--accent); }
+.monitor-hint { font-size: 12px; color: var(--fg3); overflow-wrap: anywhere; }
 .connection { display: flex; align-items: center; gap: 8px; }
 .connection select { min-width: 0; max-width: 130px; background: var(--raise); color: var(--fg); border: 1px solid var(--line); border-radius: 5px; padding: 4px; }
 .connection .file { flex: 1; min-width: 0; }
@@ -116,6 +187,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .slide .song { position: absolute; left: 12px; bottom: 8px; font-size: clamp(11px, 2.4cqw, 16px); background: rgba(0, 0, 0, 0.35); padding: 2px 8px; border-radius: 999px; }
 .slide .sn { position: absolute; right: 10px; bottom: 8px; font-family: var(--f-mono); font-size: clamp(11px, 2.2cqw, 15px); background: rgba(0, 0, 0, 0.7); padding: 2px 6px; border-radius: 4px; }
 .slide.black { background: #000; border-color: var(--line); align-items: center; }
+.slide.live-monitor { padding: 0; background: #07080f; }
+.popup-active { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; color: var(--fg2); padding: 16px; text-align: center; }
+.popup-retract { font-size: 13px; padding: 4px 12px; border-color: var(--accent); color: var(--accent); }
 .blackhint { color: var(--fg3); font-size: 14px; }
 .ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ctl button { height: 46px; padding: 0 16px; font-size: 16px; white-space: nowrap; }
