@@ -66,27 +66,29 @@ def kugou_row(title, artist):
 class VirtualList(Element):
     """酷狗 10.2.52 的虚拟列表替身：只有视口上下一行以内的项有名字和矩形，滚轮移动内容。"""
 
-    def __init__(self, name, names, *, left, top, width, height, row):
+    def __init__(self, name, names, *, left, top, width, height, row, reuse_rows=False):
         super().__init__('List', name, left=left, top=top, width=width, height=height)
         self.names, self.row, self.offset = list(names), row, 0
-        self._children = [Element('ListItem') for _ in self.names]
+        self.reuse_rows = reuse_rows
+        slots = min(len(self.names), height // row + 3) if reuse_rows else len(self.names)
+        self._children = [Element('ListItem') for _ in range(slots)]
         for item in self._children:
             item.parent = self
         self.layout()
 
     def layout(self):
         view = self.rectangle
-        top = view.top - self.offset
-        for item, name in zip(self._children, self.names):
-            if name is None:
-                # 始终隐藏、不占位置的槽位，例如「添加到」对话框顶部读不到名字的分组标题。
-                item.name, item.visible, item.rectangle = '', False, ZERO
-                continue
-            realized = view.top - self.row <= top < view.bottom + self.row
+        first = max(0, int(self.offset // self.row) - 1) if self.reuse_rows else 0
+        top = view.top + first * self.row - self.offset
+        for index, item in enumerate(self._children, start=first):
+            name = self.names[index] if index < len(self.names) else None
+            # None 表示不占位置的隐藏分组标题，或复用池里未被用到的槽位。
+            realized = name is not None and view.top - self.row <= top < view.bottom + self.row
             item.name, item.visible = (name if realized else ''), realized
             item.rectangle = (SimpleNamespace(left=view.left, top=top, right=view.right, bottom=top + self.row)
                               if realized else ZERO)
-            top += self.row
+            if name is not None:
+                top += self.row
 
     def scroll(self, pixels):
         shown = sum(name is not None for name in self.names)
@@ -108,10 +110,12 @@ class FakeKugou:
 
     NOTCH, PLAY_BAR = 70, 8
 
-    def __init__(self, playlists, *, on_music=True, nav_offset=0, song_rows=5):
+    def __init__(self, playlists, *, on_music=True, nav_offset=0, song_rows=5, reuse_song_rows=False):
         self.playlists = dict(playlists)
         self.on_music, self.opened, self.song_rows = on_music, None, song_rows
+        self.reuse_song_rows = reuse_song_rows
         self.clicks, self.wheels, self.play_bar_hits, self.now = [], [], 0, ('旧歌', '旧歌手')
+        self.waits = []
         self.artist_hits = 0
         names = ['我的收藏', '本地与下载', '默认列表', '自建歌单', *self.playlists]
         self.nav = VirtualList('导航', names, left=0, top=100, width=200, height=300, row=50)
@@ -147,7 +151,8 @@ class FakeKugou:
         tracks = self.playlists[name]
         self.opened = name
         self.songs = VirtualList('单曲', [kugou_row(*track) for track in tracks],
-                                 left=300, top=200, width=600, height=40 * self.song_rows, row=40)
+                                 left=300, top=200, width=600, height=40 * self.song_rows, row=40,
+                                 reuse_rows=self.reuse_song_rows)
         self.rebuild()
 
     # Input 替身
@@ -187,6 +192,13 @@ class FakeKugou:
         pass
 
     def patches(self):
+        clock = time.monotonic()
+
+        def sleep(seconds):
+            nonlocal clock
+            self.waits.append(seconds)
+            clock += seconds
+
         return (
             patch.object(Navigation, '_root', lambda hwnd: self.root),
             patch.object(Page, '_root', lambda hwnd: self.root),
@@ -194,7 +206,8 @@ class FakeKugou:
             patch.object(Ui, 'Input', self),
             patch.object(Scrolling, 'Input', self),
             patch.object(Page, 'Input', self),
-            patch.object(time, 'sleep'),
+            patch.object(time, 'sleep', sleep),
+            patch.object(time, 'monotonic', lambda: clock),
             patch.object(Page, '_pattern', return_value=None),
         )
 

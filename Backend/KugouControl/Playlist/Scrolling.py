@@ -14,16 +14,24 @@ def _layout(container):
     return tuple(((index, child.name), child.rectangle.top) for index, child in enumerate(container.children()) if child.name)
 
 
-def _steady(read, seconds=1.2):
-    last = read()
-    end = time.monotonic() + seconds
+def _steady(read, last, deadline):
+    end = min(deadline, time.monotonic() + 1.2)
     while time.monotonic() < end:
-        time.sleep(0.08)
+        time.sleep(min(0.08, max(0, end - time.monotonic())))
         now = read()
         if now == last:
             return now
         last = now
-    return last
+    return None
+
+
+def _unique_tops(layout):
+    tops, repeated = {}, set()
+    for (_, name), top in layout:
+        if name in tops:
+            repeated.add(name)
+        tops[name] = top
+    return {name: top for name, top in tops.items() if name not in repeated}
 
 
 class _PatternScroll:
@@ -76,41 +84,46 @@ class _WheelScroll:
 
     def __init__(self, hwnd, container):
         self.hwnd, self.container, self.per_notch = hwnd, container, 0.0
+        self.unsettled = False
 
-    def wheel(self, notches):
+    def wheel(self, notches, deadline=float('inf')):
         """投递滚轮并等列表停稳；位置没有变化时返回 False，不能据此认定到达边界。"""
+        if time.monotonic() >= deadline:
+            return False
+        self.unsettled = False
         before = _layout(self.container)
         rect = self.container.rectangle
         Input.wheel(self.hwnd, (rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2, notches)
         # 滚轮是投递的消息，酷狗忙（刚切页、刚加载）时要过一会儿才处理；先等列表开始变化，
         # 否则马上连读两次都没变就会误判成「滚不动」，侧栏读不全（2026-11-18 真机连续检测时复现）。
-        end = time.monotonic() + PLAYLIST_LAYOUT["wheel_start"]
-        while _layout(self.container) == before:
+        end = min(deadline, time.monotonic() + PLAYLIST_LAYOUT["wheel_start"])
+        while (changed := _layout(self.container)) == before:
             if time.monotonic() >= end:
                 return False
-            time.sleep(0.05)
-        after = _steady(lambda: _layout(self.container))
-        if after == before:
+            time.sleep(min(PLAYLIST_LAYOUT['wheel_poll'], max(0, end - time.monotonic())))
+        after = _steady(lambda: _layout(self.container), changed, deadline)
+        if after is None or after == before:
+            self.unsettled = True
             return False
-        tops = dict(before)
-        shifts = [abs(tops[name] - top) for name, top in after if name in tops]
-        if shifts and abs(notches) == 1:
+        if abs(notches) == 1:
             # 只用滚一格的观测，取最大值：估大了只是多滚几次，估小了（比如在列表边缘只滚了半格）才会跳过行。
-            self.per_notch = max(self.per_notch, max(shifts))
+            tops = _unique_tops(before)
+            direction = 1 if notches > 0 else -1
+            shifts = {(tops[name] - top) * direction for name, top in _unique_tops(after).items() if name in tops}
+            if len(shifts) == 1:
+                self.per_notch = max(self.per_notch, shifts.pop())
         return True
 
     def top(self, deadline):
-        while time.monotonic() < deadline and self.wheel(-40):
+        while self.wheel(-40, deadline):
             pass
 
-    def at_end(self):
-        return False
-
-    def down(self, direction=1):
-        # 每次最多滚过视口的 3/4，相邻两屏有重叠，不会漏行；还没测出每格距离时先滚一格。
+    def down(self, direction=1, *, fraction=0.85, deadline=float('inf')):
+        # 歌曲靠相邻视口的重叠证明连续；侧栏有稳定槽位，允许更靠近一屏。
         view = self.container.rectangle
-        notches = max(1, int((view.bottom - view.top) * 0.75 // self.per_notch)) if self.per_notch else 1
-        return self.wheel(direction * notches)
+        pixels = (view.bottom - view.top) * fraction
+        notches = max(1, int(pixels // self.per_notch)) if self.per_notch else 1
+        return self.wheel(direction * notches, deadline)
 
-    def nudge(self, notches):
-        return self.wheel(notches)
+    def nudge(self, notches, deadline=float('inf')):
+        return self.wheel(notches, deadline)

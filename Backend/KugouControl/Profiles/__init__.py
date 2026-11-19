@@ -26,7 +26,7 @@ PLAYLIST_LAYOUT = {"wait": 14.0, "inspect_wait": 24.0, "play_wait": 10.0, "add_w
                    "music_tab": "音乐", "nav_list": "导航", "own_header": "自建歌单", "song_lists": ("单曲",),
                    "nav_fixed": ("我的收藏", "我的频道", "本地与下载", "音乐云盘", "已购音乐", "最近播放", "默认列表",
                                  "自建歌单", "收藏歌单"),
-                   "edge_margin": 12, "scan_notches": 3, "row_blank_right": 0.025, "wheel_start": 0.6,
+                   "edge_margin": 12, "scan_notches": 3, "row_blank_right": 0.025, "wheel_start": 0.6, "wheel_poll": 0.05,
                    "filter_names": ("歌单内搜索", "搜索歌单", "搜索本歌单", "搜索歌曲", "搜索"),
                    "empty_names": ("暂无歌曲", "没有找到相关歌曲", "没有搜索结果", "无搜索结果"),
                    "empty_playlist_names": ("暂无歌曲", "这里没内容显示~"),

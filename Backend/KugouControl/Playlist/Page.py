@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import time
+from typing import NamedTuple
 
 import win32con
 
@@ -122,8 +123,8 @@ def _labelled_row(name):
     return track
 
 
-def _row_track(row, headers):
-    labelled = _labelled_row(row.name or "")
+def _row_track(row, headers, label=None):
+    labelled = _labelled_row((row.name if label is None else label) or "")
     if labelled:
         return labelled
     cells = [e for e in row.children() if e.control_type in ("Text", "DataItem", "Custom")]
@@ -199,7 +200,7 @@ def _target_row(collection, headers, target):
     return matches[0] if matches else None
 
 
-def _reveal_row(scroller, collection, headers, target, deadline, *, index=None, bottom=None):
+def _reveal_row(scroller, collection, headers, target, deadline, *, bottom=None):
     for _ in range(60):
         view = collection.rectangle
         row = _target_row(collection, headers, target)
@@ -208,15 +209,92 @@ def _reveal_row(scroller, collection, headers, target, deadline, *, index=None, 
         if scroller is None or time.monotonic() >= deadline:
             break
         if row is not None:
-            moved = scroller.nudge(1 if row.rectangle.bottom > _clear_span(row, view, bottom=bottom)[1] else -1)
-        elif isinstance(scroller, _WheelScroll) and index is not None:
-            visible = [i for i, item in enumerate(_row_slots(collection)) if _in_view(item, view)]
-            moved = scroller.down(-1 if visible and index < min(visible) else 1)
+            direction = 1 if row.rectangle.bottom > _clear_span(row, view, bottom=bottom)[1] else -1
+            moved = scroller.nudge(direction, deadline) if isinstance(scroller, _WheelScroll) else scroller.nudge(direction)
+        elif isinstance(scroller, _WheelScroll):
+            # 完整扫描停在列表末端，可能已经滚过目标；回滚时按内容重新定位。
+            moved = scroller.down(-1, deadline=deadline)
         else:
             break
         if not moved:
             break
     raise PlaylistUnsupported("歌单里的目标歌曲无法完整显示，保留搜索播放")
+
+
+class _WheelRow(NamedTuple):
+    label: str
+    track: dict | None
+    top: float
+    bottom: float
+
+
+def _wheel_frame(collection, headers, rows=None):
+    view = collection.rectangle
+    if rows is None:
+        rows = _row_slots(collection)
+    frame, has_rows_above = [], False
+    for row in rows:
+        rect = row.rectangle
+        if not (rect.left < view.right and rect.right > view.left and rect.bottom > rect.top):
+            continue
+        if rect.top < view.top and row.name:
+            has_rows_above = True
+        if view.top < rect.bottom and rect.top < view.bottom and row.visible:
+            label = row.name or ''
+            frame.append(_WheelRow(label, _row_track(row, headers, label), rect.top, rect.bottom))
+    return sorted(frame, key=lambda row: row.top), has_rows_above, len(rows)
+
+
+def _wheel_overlap(previous, current):
+    """相邻画面须有唯一的前后缀重叠，且这些行向上平移同样距离。"""
+    matches = []
+    for length in range(1, min(len(previous), len(current)) + 1):
+        old, new = previous[-length:], current[:length]
+        shift = old[0].top - new[0].top
+        if shift > 0 and all(
+            left[:2] == right[:2] and abs(left.top - right.top - shift) < 1
+            and abs(left.bottom - right.bottom - shift) < 1
+            for left, right in zip(old, new)
+        ):
+            matches.append(length)
+    return matches[0] if len(matches) == 1 else 0
+
+
+def _wheel_count_matches(rows, total, slot_count):
+    if total is None:
+        return False
+    trailing = (len(rows) == total + 1 and rows[-1].track is None
+                and rows[-1].label.startswith('<a ') and rows[-1].label.endswith('</a>'))
+    # 槽位比已读内容多时存在未解释的行；槽位少则可能是元素复用，仍可按内容和总数证明覆盖。
+    return (len(rows) == total + trailing and slot_count <= len(rows)
+            and all(row.track is not None for row in rows[:total]))
+
+
+def _scan_wheel(collection, headers, scroller, rows, total, deadline):
+    frame, has_rows_above, slot_count = _wheel_frame(collection, headers, rows)
+    if has_rows_above or (total is not None and slot_count < total):
+        # 只暴露视口行的虚拟列表没有「上一行」可读，也必须从顶部起扫。
+        scroller.top(deadline)
+        frame, _, slot_count = _wheel_frame(collection, headers)
+        if scroller.unsettled:
+            return frame, False
+    stitched = frame.copy()
+    while time.monotonic() < deadline:
+        complete = _wheel_count_matches(stitched, total, slot_count)
+        # 最后一行下面还有可见空白，整张列表已在当前视口显示，不用投递一次注定无效的滚轮。
+        if complete and (not frame or frame[-1].bottom < collection.rectangle.bottom):
+            return stitched, True
+        if not scroller.down(deadline=deadline):
+            latest, _, size = _wheel_frame(collection, headers)
+            # 无移动不能证明已到底。只在按内容已覆盖 N 首、且停止前后读到的内容保持稳定时才接受。
+            return stitched, complete and not scroller.unsettled and latest == frame and size == slot_count
+        latest, _, slot_count = _wheel_frame(collection, headers)
+        overlap = _wheel_overlap(frame, latest)
+        if not overlap:
+            return stitched, False
+        stitched.extend(latest[overlap:])
+        frame = latest
+    return stitched, False
 
 
 def _scan(hwnd, page, deadline, target=None, name="", *, verify_page=None):
@@ -228,7 +306,8 @@ def _scan(hwnd, page, deadline, target=None, name="", *, verify_page=None):
     collection = _collection(page)
     headers = _headers(collection)
     scroller = _scroller(hwnd, collection)
-    if scroller is not None:
+    wheel = isinstance(scroller, _WheelScroll)
+    if scroller is not None and not wheel:
         scroller.top(deadline)
     loading_until = min(deadline, time.monotonic() + PLAYLIST_LAYOUT["load_wait"])
     while True:
@@ -243,16 +322,50 @@ def _scan(hwnd, page, deadline, target=None, name="", *, verify_page=None):
             if _collection(page) != collection or not _unfiltered(page):
                 return [], False, None
 
+    if wheel:
+        found, coverage = _scan_wheel(collection, headers, scroller, rows, total, deadline)
+        slots = {i: row.track for i, row in enumerate(found)}
+        labels = {i: row.label for i, row in enumerate(found)}
+        stable, locations = True, {}
+    else:
+        slots, labels, locations, stable, coverage = _scan_pattern(collection, headers, scroller, rows, deadline)
+
+    latest = verify_page() if verify_page is not None else page
+    if not stable or _collection(latest) != collection or not _unfiltered(latest):
+        return [], False, None
+    stable_count = not name or total == _total(latest, name)
+    known = [track for track in slots.values() if track is not None]
+    tracks = list({(track['title'], track['artist']): track for track in known}.values())
+    covered = stable_count and coverage and (not name or total is None or len(known) == total)
+    covered = covered and time.monotonic() < deadline and not (known and _empty(latest))
+    if not known:
+        empty = empty and stable_count and not _row_slots(collection) and _empty_playlist(latest)
+        return [], empty and covered, None
+
+    if target:
+        matches = [key for key, track in slots.items() if track and exact_track(track['title'], track['artist'], *target)]
+        if len(matches) > 1:
+            raise TrackFailed('歌单内有多个同名版本，请在酷狗中只保留目标版本')
+        if covered and matches:
+            matched = matches[0]
+            if isinstance(scroller, _PatternScroll) and _target_row(collection, headers, target) is None:
+                scroller.restore(locations[matched])
+            bottom = _list_bottom(_root(hwnd), collection.rectangle) if verify_page is not None else None
+            row = _reveal_row(scroller, collection, headers, target, deadline, bottom=bottom)
+            if row[0].name != labels[matched] or _row_track(row[0], headers) != slots[matched]:
+                raise PlaylistUnsupported('歌单歌曲行在定位期间发生变化，请重新检测')
+            return tracks, False, row
+    return tracks, covered and len(tracks) == len(known), None
+
+
+def _scan_pattern(collection, headers, scroller, rows, deadline):
     slots, labels, locations, references, last_visible = {}, {}, {}, {}, None
-    wheel = isinstance(scroller, _WheelScroll)
     stable = True
     coverage = False
     size = len(rows)
     while True:
         view = collection.rectangle
         observed = set()
-        if wheel and len(rows) != size:
-            stable = False
         for index, row in enumerate(rows):
             if not _in_view(row, view):
                 continue
@@ -275,13 +388,7 @@ def _scan(hwnd, page, deadline, target=None, name="", *, verify_page=None):
                 slots[key] = track
             if isinstance(scroller, _PatternScroll):
                 locations.setdefault(key, scroller.position())
-        if wheel:
-            # 末尾可能残留一条只有歌名链接的行；仅在真正的槽位和总数吻合时排除这种已知残留。
-            trailing_name = (rows[-1].name or '') if rows else ''
-            trailing = (total is not None and size == total + 1 and trailing_name.startswith('<a ')
-                        and trailing_name.endswith('</a>') and slots.get(total) is None)
-            coverage = total is not None and (size == total or trailing) and all(slots.get(i) for i in range(total))
-        elif scroller is None:
+        if scroller is None:
             coverage = len(slots) == size and not any(e.control_type == "ScrollBar" for e in _walk(collection, 2))
         else:
             if last_visible and observed and not last_visible.intersection(observed):
@@ -292,35 +399,7 @@ def _scan(hwnd, page, deadline, target=None, name="", *, verify_page=None):
             break
         rows = _row_slots(collection)
 
-    latest = verify_page() if verify_page is not None else page
-    if not stable or _collection(latest) != collection or not _unfiltered(latest):
-        return [], False, None
-    stable_count = not name or total == _total(latest, name)
-    known = [track for track in slots.values() if track is not None]
-    tracks = list({(track['title'], track['artist']): track for track in known}.values())
-    if not wheel and any(track is None for track in slots.values()):
-        coverage = False
-    covered = stable_count and coverage and (not name or total is None or len(known) == total)
-    covered = covered and time.monotonic() < deadline and not (known and _empty(latest))
-    if not known:
-        empty = empty and stable_count and not _row_slots(collection) and _empty_playlist(latest)
-        return [], empty and covered, None
-
-    if target:
-        matches = [key for key, track in slots.items() if track and exact_track(track['title'], track['artist'], *target)]
-        if len(matches) > 1:
-            raise TrackFailed('歌单内有多个同名版本，请在酷狗中只保留目标版本')
-        if covered and matches:
-            matched = matches[0]
-            if isinstance(scroller, _PatternScroll) and _target_row(collection, headers, target) is None:
-                scroller.restore(locations[matched])
-            bottom = _list_bottom(_root(hwnd), collection.rectangle) if verify_page is not None else None
-            row = _reveal_row(scroller, collection, headers, target, deadline,
-                              index=matched if wheel else None, bottom=bottom)
-            if row[0].name != labels[matched] or (wheel and _row_slots(collection)[matched:matched + 1] != [row[0]]):
-                raise PlaylistUnsupported('歌单歌曲行在定位期间发生变化，请重新检测')
-            return tracks, False, row
-    return tracks, covered and len(tracks) == len(known), None
+    return slots, labels, locations, stable, coverage and all(track is not None for track in slots.values())
 
 
 def _filters(page):
@@ -344,6 +423,8 @@ def _set_filter(hwnd, page, query, deadline):
     value = _pattern(edit, "Value")
     if not value:
         raise PlaylistUnsupported("歌单内搜索框不支持回读")
+    if (value.CurrentValue or '') == query == '':
+        return
     _click(hwnd, edit)
     Input.press(hwnd, win32con.VK_END)
     Input.press(hwnd, win32con.VK_BACK, len(value.CurrentValue or '') + 2)
@@ -384,7 +465,7 @@ def inspect(hwnd, name, *, deadline=None, exact_only=False, unique=True):
         if tracks or complete:
             state.update(route='A', supported=True, tracks=tracks, complete=complete,
                          note=matched + f'通过歌曲列定位，读到 {len(tracks)} 首'
-                         + ('；列表已完整读取' if complete else '；仅确认已读成员，未读部分保持未知'))
+                         + ('；列表已完整读取' if complete else '；列表未完整读取，未读部分保持未知'))
         else:
             try:
                 _filter(page)
