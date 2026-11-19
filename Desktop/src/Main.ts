@@ -1,9 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, screen, session, shell, webContents } from 'electron'
 import { BackendManager, type BackendStatus } from './BackendManager.js'
 import { isAllowedAppUrl, parseDesktopOptions, resolveDesktopPaths } from './Config.js'
 import { installApplicationMenu } from './Menu.js'
+import { registerMonitor, type MonitorController } from './Monitor.js'
 import { loadWindowState, saveWindowState } from './WindowState.js'
 
 // 禁止 Chromium 抢占系统硬件媒体键，避免演出时影响酷狗快捷键/媒体控制。
@@ -22,11 +23,13 @@ const paths = resolveDesktopPaths({
 })
 
 const windowStateFile = path.join(app.getPath('userData'), 'windowstate.json')
+const monitorWindowStateFile = path.join(app.getPath('userData'), 'monitorwindow.json')
 const backend = new BackendManager(paths, options)
 
 let mainWindow: BrowserWindow | null = null
 let activeAppUrl: string | null = null
 let isQuitting = false
+let monitorController: MonitorController | null = null
 
 const gotLock = options.smokeTest ? true : app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -144,7 +147,13 @@ function createMainWindow(): BrowserWindow {
   win.on('move', () => {
     if (!win.isMaximized() && !win.isFullScreen()) normalBounds = win.getBounds()
   })
-  win.on('close', persistBounds)
+  win.on('moved', () => {
+    monitorController?.notifyMainWindowMoved()
+  })
+  win.on('close', () => {
+    persistBounds()
+    monitorController?.closeWindow()
+  })
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
   })
@@ -171,6 +180,9 @@ function createMainWindow(): BrowserWindow {
     if (isQuitting) return
     backend.reportError('界面渲染进程意外终止', `原因：${details.reason}（code=${details.exitCode}）`)
     void showLoadingPage()
+  })
+  win.webContents.on('did-finish-load', () => {
+    monitorController?.notifyWindowState()
   })
 
   mainWindow = win
@@ -216,6 +228,21 @@ if (gotLock) {
 
   app.whenReady().then(async () => {
     registerIpcHandlers()
+    monitorController = registerMonitor({
+      BrowserWindow,
+      desktopCapturer,
+      ipcMain,
+      screen,
+      session,
+      webContents,
+      getMainWindow: () => mainWindow,
+      getAppUrl: () => activeAppUrl,
+      loadingPagePath: paths.loadingPage,
+      preloadPath: path.join(import.meta.dirname, 'Preload.cjs'),
+      iconPath: paths.iconPath,
+      stateFile: monitorWindowStateFile,
+      isSmokeTest: options.smokeTest,
+    })
     installApplicationMenu({
       getWindow: () => mainWindow,
       onRestartBackend: () => {
@@ -252,6 +279,7 @@ if (gotLock) {
     if (isQuitting) return
     isQuitting = true
     event.preventDefault()
+    monitorController?.dispose()
     void backend.stop().finally(() => {
       app.exit(0)
     })
