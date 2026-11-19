@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from KugouControl import Playlist, Track
-from KugouControl.Playlist import Add, Navigation, Playback
+from KugouControl.Playlist import Add, Navigation
 from Tests.TestPlaylistFakes import Element, FakeKugou, IsolatedPlaylistTestCase, VirtualList
 
 
@@ -142,7 +142,7 @@ class PlaylistAddTests(IsolatedPlaylistTestCase):
             stack.enter_context(patch('KugouControl.Uia.read_controls',
                                       side_effect=lambda hwnd: {'status': 'playing', 'duration': live.duration}))
             auditioned = stack.enter_context(patch.object(Track, '_play_search', side_effect=search))
-            play = stack.enter_context(patch.object(Playback, 'play_from_playlist'))
+            play = stack.enter_context(patch.object(Add, 'play_from_playlist', create=True))
             invoke = stack.enter_context(patch.object(Add, '_confirm', side_effect=confirm))
             pause = stack.enter_context(patch.object(Add, '_pause'))
             result = Playlist.add_to_playlist(1, 2, '演出歌单', '歌曲', '歌手')
