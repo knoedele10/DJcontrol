@@ -1,0 +1,15 @@
+# CI 后端依赖版本约束（#2）
+# Requirements*.txt 用的是宽松区间，CI 每次全新解析会装到未验证的最新版
+# （首跑即因新版 fastapi 的 _IncludedRouter 与 starlette TestClient 行为变化挂了 4 项测试）。
+# 这里钉住与本机 2026-11-19 全绿环境（197 tests OK）完全一致的组合；
+# 要升级请先在本机跑通后端测试，再同步更新本文件。
+fastapi==0.115.6
+starlette==0.41.3
+uvicorn==0.34.0
+httpx==0.28.1
+httpcore==1.0.9
+anyio==4.13.0
+pydantic==2.10.3
+pydantic-core==2.27.1
+pywin32==311
+pywinauto==0.6.9

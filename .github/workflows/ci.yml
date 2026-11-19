@@ -31,9 +31,13 @@ jobs:
           cache-dependency-path: |
             Backend/Requirements.txt
             Backend/RequirementsDev.txt
+            .github/ci-backend-constraints.txt
 
+      # Requirements 是宽松区间，全新解析会装到未验证的新版本（首跑即因新版 fastapi
+      # 的 _IncludedRouter 与 starlette TestClient 行为变化挂了 4 项测试）；
+      # 用约束文件钉住与本机全绿环境一致的版本组合。
       - name: 安装依赖
-        run: python -m pip install -r Backend/RequirementsDev.txt
+        run: python -m pip install -r Backend/RequirementsDev.txt -c .github/ci-backend-constraints.txt
 
       - name: 运行后端测试
         working-directory: Backend

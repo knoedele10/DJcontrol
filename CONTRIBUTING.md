@@ -72,7 +72,8 @@ git worktree add .worktrees/<名字> -b <分支> origin/master
 ```powershell
 # 后端：Python 3.13（运行数据与日志在 Backend/Data/，不入库）
 cd Backend
-python -m pip install -r RequirementsDev.txt    # 已含 Requirements.txt 和测试所需 httpx
+python -m pip install -r RequirementsDev.txt -c ../.github/ci-backend-constraints.txt
+# 约束文件钉住与本机、CI 一致的已验证版本组合，避免新机器装到未验证的最新版
 python -m unittest discover -s Tests -t . -p "Test*.py"
 ```
 
