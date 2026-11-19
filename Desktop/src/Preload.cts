@@ -1,4 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { MonitorDisplay } from './Monitor.js' with { 'resolution-mode': 'import' }
+
+export interface DesktopMonitorBridge {
+  listDisplays: () => Promise<MonitorDisplay[]>
+  select: (displayId: string | null) => Promise<boolean>
+  openWindow: () => Promise<boolean>
+  closeWindow: () => Promise<void>
+  onDisplaysChanged: (listener: (displays: MonitorDisplay[]) => void) => () => void
+  onWindowChanged: (listener: (open: boolean) => void) => () => void
+}
 
 export interface DesktopBridge {
   isElectron: true
@@ -14,6 +24,7 @@ export interface DesktopBridge {
   openLogsDir: () => Promise<void>
   toggleFullscreen: () => Promise<boolean>
   onStatus: (listener: (status: unknown) => void) => () => void
+  monitor: DesktopMonitorBridge
 }
 
 const bridge: DesktopBridge = {
@@ -33,6 +44,22 @@ const bridge: DesktopBridge = {
     const wrapped = (_event: Electron.IpcRendererEvent, status: unknown) => listener(status)
     ipcRenderer.on('desktop:status', wrapped)
     return () => ipcRenderer.removeListener('desktop:status', wrapped)
+  },
+  monitor: {
+    listDisplays: () => ipcRenderer.invoke('monitor:listDisplays'),
+    select: (displayId) => ipcRenderer.invoke('monitor:select', displayId),
+    openWindow: () => ipcRenderer.invoke('monitor:openWindow'),
+    closeWindow: () => ipcRenderer.invoke('monitor:closeWindow'),
+    onDisplaysChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, displays: MonitorDisplay[]) => listener(displays)
+      ipcRenderer.on('monitor:displaysChanged', wrapped)
+      return () => ipcRenderer.removeListener('monitor:displaysChanged', wrapped)
+    },
+    onWindowChanged: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, open: boolean) => listener(open)
+      ipcRenderer.on('monitor:windowChanged', wrapped)
+      return () => ipcRenderer.removeListener('monitor:windowChanged', wrapped)
+    },
   },
 }
 
