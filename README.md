@@ -1,5 +1,7 @@
 # 酷狗统筹面板（KuGouDashboard）
 
+[![CI](https://github.com/knoedele10/DJcontrol/actions/workflows/ci.yml/badge.svg)](https://github.com/knoedele10/DJcontrol/actions/workflows/ci.yml) · 协作请先读 [CONTRIBUTING.md](CONTRIBUTING.md)
+
 活动现场用的控制面板：管理曲库和分组、排队播放（模拟或酷狗）、控制 PowerPoint / WPS 翻页并按页联动放歌。
 
 - 后端 `Backend`：FastAPI + SQLite，运行在 Windows（COM、界面自动化需要和酷狗、PPT 同一桌面会话）
