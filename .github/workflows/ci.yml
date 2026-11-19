@@ -1,0 +1,102 @@
+# CI：后端 / 前端 / 桌面端三项检查。
+# 后端依赖 Windows 的 COM 与界面自动化库，测试只能在 Windows 上跑。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# 同一分支 / PR 有新推送时，取消仍在跑的旧运行。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: 后端测试
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: |
+            Backend/Requirements.txt
+            Backend/RequirementsDev.txt
+
+      - name: 安装依赖
+        run: python -m pip install -r Backend/RequirementsDev.txt
+
+      - name: 运行后端测试
+        working-directory: Backend
+        run: python -m unittest discover -s Tests -t . -p "Test*.py"
+
+  frontend:
+    name: 前端测试
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 两个 package.json 都没有 packageManager 字段，pnpm 版本在这里固定。
+      - name: 安装 pnpm 11.21.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+
+      - name: 安装 Node 24.16
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.16'
+          cache: 'pnpm'
+          cache-dependency-path: Template/pnpm-lock.yaml
+
+      - name: 安装依赖
+        working-directory: Template
+        run: pnpm install --frozen-lockfile
+
+      - name: 运行前端测试
+        working-directory: Template
+        run: pnpm test
+
+      - name: 构建前端
+        working-directory: Template
+        run: pnpm build
+
+  desktop:
+    name: 桌面端测试
+    runs-on: windows-latest
+    env:
+      # 测试只做类型检查 + 构建 + node 测试，不启动 Electron，也无需下载其二进制。
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm 11.21.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+
+      - name: 安装 Node 24.16
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.16'
+          cache: 'pnpm'
+          cache-dependency-path: Desktop/pnpm-lock.yaml
+
+      - name: 安装依赖
+        working-directory: Desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: 运行桌面端测试
+        working-directory: Desktop
+        run: pnpm test
