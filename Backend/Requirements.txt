@@ -1,3 +1,5 @@
+# 确切版本锁定在 Constraints.txt（CI、Docker、桌面打包共用），这里只写直接依赖和允许的范围。
+-c Constraints.txt
 fastapi>=0.115.6,<1
 uvicorn[standard]>=0.34,<1
 pywin32>=308; sys_platform == "win32"

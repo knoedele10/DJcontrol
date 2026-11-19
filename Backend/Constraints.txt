@@ -1,0 +1,28 @@
+# 后端依赖的确切版本（含间接依赖），取自 2026-11-18 真机验证所用的环境（Python 3.13，Windows）。
+# Requirements.txt 用 `-c Constraints.txt` 引用本文件，所以 CI、Docker 镜像和桌面版打包都装这里的版本。
+# 升级依赖：先在本机升级并跑通后端测试（涉及酷狗、PPT 的还要真机验证），再整体更新本文件。
+# Docker 镜像（Linux）里 uvicorn[standard] 还会装 uvloop，它只在 Linux 上用到，这里没有锁定。
+annotated-types==0.7.0
+anyio==4.13.0
+certifi==2026.2.25
+click==8.1.8
+colorama==0.4.6
+comtypes==1.4.17
+fastapi==0.115.6
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.7.1
+httpx==0.28.1
+idna==3.11
+pydantic==2.10.3
+pydantic-core==2.27.1
+python-dotenv==1.0.1
+pywin32==311
+pywinauto==0.6.9
+pyyaml==6.0.3
+six==1.17.0
+starlette==0.41.3
+typing-extensions==4.15.0
+uvicorn==0.34.0
+watchfiles==1.1.1
+websockets==16.0

@@ -17,7 +17,7 @@ ENV PIP_NO_CACHE_DIR=1 \
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 WORKDIR /build
-COPY Backend/Requirements.txt ./
+COPY Backend/Requirements.txt Backend/Constraints.txt ./
 RUN pip install -r Requirements.txt
 
 # ---------- Runtime ----------
